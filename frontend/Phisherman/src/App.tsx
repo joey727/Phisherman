@@ -77,8 +77,8 @@ function App() {
           <div>
             <strong>Reasons:</strong>
             <ul>
-              {result.reasons.map((r, i) => (
-                <li key={i}>{r}</li>
+              {result.reasons.map((r) => (
+                <li key={r}>{r}</li>
               ))}
             </ul>
           </div>
