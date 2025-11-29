@@ -1,4 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import "./App.css";
+import { URLInput } from "./components/URLInput";
+import { ResultCard } from "./components/ResultCard";
+import { LoadingSpinner } from "./components/LoadingSpinner";
 
 type Result = {
   url: string;
@@ -9,26 +13,29 @@ type Result = {
 };
 
 function App() {
-  const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleCheck(e?: React.FormEvent) {
-    e?.preventDefault();
+  async function handleCheck(urlToCheck: string) {
+    if (!urlToCheck.trim()) return;
+
     setError(null);
     setResult(null);
     setLoading(true);
+
     try {
       const resp = await fetch("http://localhost:4000/api/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: urlToCheck }),
       });
+
       if (!resp.ok) {
         const body = await resp.json();
         throw new Error(body.error || "Request failed");
       }
+
       const data: Result = await resp.json();
       setResult(data);
     } catch (err: any) {
@@ -39,58 +46,31 @@ function App() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 760,
-        margin: "2rem auto",
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <h1>Phisherman — URL scanner</h1>
-      <form onSubmit={handleCheck} style={{ display: "flex", gap: 8 }}>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="input URL to check"
-          style={{ flex: 1, padding: "0.5rem" }}
-        />
-        <button type="submit" disabled={loading}>
-          Check
-        </button>
-      </form>
-
-      {loading && <p>Checking…</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      {result && (
-        <div
-          style={{
-            marginTop: 20,
-            border: "1px solid #eee",
-            padding: 16,
-            borderRadius: 8,
-          }}
-        >
-          <h2>Result: {result.verdict.toUpperCase()}</h2>
-          <p>Score: {result.score} / 100</p>
-
-          <div>
-            <strong>Reasons:</strong>
-            <ul>
-              {result.reasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
+    <div className="app">
+      <header className="header">
+        <div className="header-content">
+          <div className="title-section">
+            <h1 className="title">🎣 Phisherman</h1>
+            <p className="subtitle">Check URLs for phishing risks</p>
           </div>
-
-          <details>
-            <summary>Raw details</summary>
-            <pre style={{ whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(result.details, null, 2)}
-            </pre>
-          </details>
         </div>
-      )}
+      </header>
+
+      <main className="container">
+        <URLInput onCheck={handleCheck} loading={loading} />
+
+        {loading && <LoadingSpinner />}
+
+        {error && <div className="error-banner">{error}</div>}
+
+        {result && <ResultCard result={result} />}
+
+        {!loading && !result && !error && (
+          <div className="empty-state">
+            <p>Enter a URL above to scan for phishing threats</p>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
