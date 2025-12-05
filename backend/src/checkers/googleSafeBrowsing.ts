@@ -5,15 +5,21 @@ dotenv.config();
 
 
 export async function checkSafeBrowsing(url: string) {
-  if (!process.env.GOOGLE_SAFE_API_KEY) return { score: 0 };
 
   try {
+    const api_key = process.env.GOOGLE_SAFE_API_KEY;
+
+    if (!api_key) {
+      console.error("safe browsing key missing");
+      return { score: 0 }
+    }
+
     const r = await axios.post(
-      `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${process.env.GOOGLE_SAFE_API_KEY}`,
+      `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${api_key}`,
       {
         client: { clientId: "phish-detector", clientVersion: "1.0" },
         threatInfo: {
-          threatTypes: ["MALWARE", "SOCIAL_ENGINEERING", "PHISHING", "POTENTIALLY_HARMFUL_APPLICATION"],
+          threatTypes: ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
           platformTypes: ["ANY_PLATFORM"],
           threatEntryTypes: ["URL"],
           threatEntries: [{ url }],
@@ -21,16 +27,18 @@ export async function checkSafeBrowsing(url: string) {
       }
     );
 
-    if (r.data && r.data.matches) {
+    console.log("safe browsing response: ", r.data);
+
+    if (r.data?.matches) {
       return {
-        score: 100,
+        score: 50,
         reason: "Google Safe Browsing flagged this URL as dangerous",
       };
     }
 
     return { score: 0 };
-  } catch (err) {
-    console.error("safe browsing error: ", err); 
+  } catch (err: any) {
+    console.error("safe browsing error: ", err.r?.data || err.message); 
     return { score: 0 }
   }
 }
