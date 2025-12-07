@@ -1,33 +1,30 @@
-// src/checkers/urlHaus.ts
 import axios from "axios";
 
 let urlhausCache: any[] = [];
 let lastLoad = 0;
-const FEED = "https://urlhaus.abuse.ch/downloads/json/";
+const FEED = "https://urlhaus.abuse.ch/downloads/json_recent/";
 
 export async function loadURLHaus() {
-  const expired = Date.now() - lastLoad > 3600 * 1000;
+  const cacheExpired = Date.now() - lastLoad > 3600 * 1000; // refresh every hour
 
-  if (!urlhausCache || expired) {
+  if (!urlhausCache || cacheExpired) {
     try {
-      const r = await axios.get(FEED, {
-        timeout: 20000,
-        decompress: false, // prevents stream abort
-        responseType: "json",
-        headers: { "Accept-Encoding": "identity" } // avoid gzip issues
+      const response = await axios.get(FEED, {
+        timeout: 30000,
+        responseType: "stream",
+        headers: { "User-Agent": "PhishermanScanner/1.0" }, // avoid gzip streaming issues
       });
 
-      if (r.data?.urls && Array.isArray(r.data.urls)) {
-        urlhausCache = r.data.urls;
-        lastLoad = Date.now();
-        console.log("URLHaus feed loaded:", urlhausCache.length);
-      } else {
-        console.warn("URLHaus JSON format invalid");
-        urlhausCache = [];
+      let data = "";
+      for await (const chunk of response.data) {
+        data += chunk.toString();
       }
+      console.log("URLHaus feed downloaded, size:", data.length);
+      const json = JSON.parse(data);
+      return json.urls || [];
     } catch (err) {
       console.error("URLHaus download error:", err);
-      urlhausCache = []; // fail open
+      return [];
     }
   }
 
@@ -36,15 +33,15 @@ export async function loadURLHaus() {
 
 export async function checkURLHaus(url: string) {
   const data = await loadURLHaus();
-  if (!data) return { score: 0 };
+  if (!data || data.length === 0) return { score: 0 };
 
-  const found = data.find((e: any) => e.url === url);
+  const found = data.find((entry: any) => entry.url === url);
 
   if (found) {
     return {
       score: 100,
-      reason: "URL matches URLHaus phishing/malware list",
-      details: found
+      reason: "URL matches URLHaus recent feed (malware/phishing)",
+      details: found,
     };
   }
 
