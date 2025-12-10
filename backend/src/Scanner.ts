@@ -2,8 +2,9 @@ import { checkPhishTank } from "./checkers/phishtank";
 import { checkSafeBrowsing } from "./checkers/googleSafeBrowsing";
 import { heuristicCheck } from "./checkers/heuristics";
 import { checkOpenPhish } from "./checkers/openPhish";
-import { checkGoogleWebRisk } from "./checkers/googleWebRisk";
+// import { checkGoogleWebRisk } from "./checkers/googleWebRisk";
 import { checkURLHaus } from "./checkers/urlHaus";
+import { safeResolveHost } from "./utils/network";
 
 interface Check {
   score: number;
@@ -11,10 +12,14 @@ interface Check {
 }
 
 export async function analyzeUrl(url: string) {
+  await safeResolveHost(
+    new URL(url.startsWith("http") ? url : `http://${url}`).hostname
+  );
+
   const checks: Check[] = await Promise.all([
     heuristicCheck(url),
     checkOpenPhish(url),
-    // checkSafeBrowsing(url),
+    checkSafeBrowsing(url),
     checkPhishTank(url),
     // checkGoogleWebRisk(url),
     checkURLHaus(url),
