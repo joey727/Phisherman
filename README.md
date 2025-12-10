@@ -1,4 +1,4 @@
-# Phisherman — Phishing URL Detection Platform
+# Phisherman - Phishing URL Detection Platform
 
 Phisherman is a lightweight phishing-detection backend built with **Node.js**, **Express**, and **TypeScript**.  
 It analyzes URLs using multiple threat-intelligence feeds, DNS-level security checks, and heuristic rules to determine whether a URL is **safe**, **suspicious**, or **phishing**.
