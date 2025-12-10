@@ -50,7 +50,7 @@ function App() {
       <header className="header">
         <div className="header-content">
           <div className="title-section">
-            <h1 className="title">🎣 Phisherman</h1>
+            <h1 className="title">Phisherman</h1>
             <p className="subtitle">Check URLs for phishing risks</p>
           </div>
         </div>
