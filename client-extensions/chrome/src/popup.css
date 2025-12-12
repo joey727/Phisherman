@@ -1,0 +1,8 @@
+body { font-family: Arial, sans-serif; width: 320px; padding: 12px; }
+#app h3 { margin: 0 0 8px 0; font-size: 16px; }
+input { width: calc(100% - 96px); padding: 6px; }
+button { padding: 6px 8px; margin-left: 8px; }
+#result { margin-top: 12px; }
+.status-safe { color: green; }
+.status-suspicious { color: orange; }
+.status-phishing { color: red; }
