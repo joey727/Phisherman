@@ -1,68 +1,116 @@
-const scanBtn = document.getElementById('scanBtn');
-const urlInput = document.getElementById('urlInput');
-const result = document.getElementById('result');
+document.addEventListener('DOMContentLoaded', () => {
+    // UI Elements
+    const loadingView = document.getElementById('loading');
+    const resultView = document.getElementById('result');
+    const errorView = document.getElementById('error');
+    const errorMsg = document.getElementById('error-msg');
+    const retryBtn = document.getElementById('retry-btn');
 
-async function getActiveTabUrl() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tabs[0]?.url || '';
-}
+    const verdictText = document.getElementById('verdict-text');
+    const verdictIcon = document.getElementById('verdict-icon');
+    const scoreValue = document.getElementById('score-value');
+    const scoreRing = document.getElementById('score-ring');
+    const detailsList = document.getElementById('details-list');
 
-async function callPhishermanApi(url) {
-    if (!url) throw new Error('No url provided');
-    // BACKEND_URL: change to your deployed or local backend
-    // Using localhost:4000 as per backend default port
-    const BACKEND_URL = 'http://localhost:4000/api/check';
-    // If your API requires a key, put it in extension storage and *never* commit it.
-    const apiKey = await chrome.storage.sync.get('phisherman_api_key').then(r => r.phisherman_api_key);
-
-    const headers = { 'Content-Type': 'application/json' };
-    if (apiKey) headers['x-api-key'] = apiKey;
-
-    try {
-        const resp = await fetch(BACKEND_URL, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ url })
-        });
-        console.log('API Response status:', resp.status);
-        if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-        return resp.json();
-    } catch (error) {
-        console.error('Fetch error:', error);
-        throw error;
+    // Helper to switch views
+    function showView(view) {
+        [loadingView, resultView, errorView].forEach(v => v.classList.add('hidden'));
+        view.classList.remove('hidden');
     }
-}
 
-function showResult(data) {
-    // expected data: { verdict: 'safe'|'suspicious'|'phishing', details: '...' }
-    result.textContent = '';
-    const div = document.createElement('div');
-    div.textContent = data.details?.error || `Verdict: ${data.verdict || 'unknown'}`;
-    div.className = data.verdict ? `status-${data.verdict}` : '';
-    result.appendChild(div);
+    // Initialize Analysis
+    init();
 
-    // Show reasons if any
-    if (data.reasons && data.reasons.length > 0) {
-        const ul = document.createElement('ul');
-        data.reasons.forEach(reason => {
-            const li = document.createElement('li');
-            li.textContent = reason;
-            ul.appendChild(li);
-        });
-        result.appendChild(ul);
+    retryBtn.addEventListener('click', () => {
+        init();
+    });
+
+    async function init() {
+        showView(loadingView);
+
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tabs || tabs.length === 0) {
+                throw new Error("No active tab found.");
+            }
+            const currentUrl = tabs[0].url;
+
+            // Send message to background script to analyze
+            chrome.runtime.sendMessage(
+                { type: 'ANALYZE_URL', url: currentUrl },
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.error(chrome.runtime.lastError);
+                        showError("Could not connect to background service.");
+                        return;
+                    }
+
+                    if (!response || !response.success) {
+                        showError(response?.error || "Analysis failed.");
+                        return;
+                    }
+
+                    renderResult(response.data);
+                }
+            );
+        } catch (err) {
+            console.error(err);
+            showError(err.message);
+        }
     }
-}
 
-scanBtn.addEventListener('click', async () => {
-    try {
-        result.textContent = 'Scanning…';
-        const provided = urlInput.value.trim();
-        const url = provided || await getActiveTabUrl();
-        console.log('Scanning URL:', url);
-        const response = await callPhishermanApi(url);
-        console.log('Scan result:', response);
-        showResult(response);
-    } catch (err) {
-        result.textContent = `Error: ${err.message}`;
+    function showError(msg) {
+        errorMsg.textContent = msg;
+        showView(errorView);
+    }
+
+    function renderResult(data) {
+        const { score, verdict, reasons, details } = data;
+
+        // Reset classes
+        verdictText.className = '';
+        scoreRing.className = 'score-ring';
+
+        let themeClass = 'safe';
+        let iconChar = '🛡️';
+        let verdictLabel = 'Safe';
+
+        if (verdict === 'danger') {
+            themeClass = 'danger';
+            iconChar = '⚠️';
+            verdictLabel = 'Unsafe';
+        } else if (verdict === 'warning') {
+            themeClass = 'warning';
+            iconChar = '✋';
+            verdictLabel = 'Suspicious';
+        }
+
+        verdictText.textContent = verdictLabel;
+        verdictText.classList.add(themeClass);
+
+        verdictIcon.textContent = iconChar;
+
+        scoreValue.textContent = score;
+        scoreRing.classList.add(themeClass);
+
+        // Render details
+        detailsList.innerHTML = '';
+
+        // Reasons
+        if (reasons && reasons.length > 0) {
+            reasons.forEach(r => {
+                const item = document.createElement('div');
+                item.className = 'detail-item';
+                item.innerHTML = `<span>${r}</span>`;
+                detailsList.appendChild(item);
+            });
+        } else {
+            const item = document.createElement('div');
+            item.className = 'detail-item';
+            item.textContent = 'No specific flags detected.';
+            detailsList.appendChild(item);
+        }
+
+        showView(resultView);
     }
 });
