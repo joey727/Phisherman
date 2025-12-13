@@ -18,7 +18,7 @@ export async function analyzeUrl(url: string) {
 
   const checks: Check[] = await Promise.all([
     heuristicCheck(url),
-    checkOpenPhish(url),
+    // checkOpenPhish(url),
     checkSafeBrowsing(url),
     checkPhishTank(url),
     // checkGoogleWebRisk(url),
