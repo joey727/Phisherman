@@ -71,39 +71,38 @@ document.addEventListener('DOMContentLoaded', () => {
         verdictText.className = '';
         scoreRing.className = 'score-ring';
 
-        let themeClass = 'safe';
-        let iconChar = '🛡️';
-        let verdictLabel = 'Safe';
+        const VERDICT_MAP = {
+            phishing: { theme: 'danger', icon: '⚠️', label: 'Unsafe' },
+            suspicious: { theme: 'warning', icon: '✋', label: 'Suspicious' },
+            safe: { theme: 'safe', icon: '🛡️', label: 'Safe' }
+        };
 
-        if (verdict === 'danger') {
-            themeClass = 'danger';
-            iconChar = '⚠️';
-            verdictLabel = 'Unsafe';
-        } else if (verdict === 'warning') {
-            themeClass = 'warning';
-            iconChar = '✋';
-            verdictLabel = 'Suspicious';
-        }
+        // Fallback to safe if backend sends unknown verdict
+        const verdictUI = VERDICT_MAP[verdict] ?? VERDICT_MAP.safe;
 
-        verdictText.textContent = verdictLabel;
-        verdictText.classList.add(themeClass);
+        // Reset UI state
+        verdictText.className = '';
+        scoreRing.className = 'score-ring';
 
-        verdictIcon.textContent = iconChar;
+        // Apply verdict UI
+        verdictText.textContent = verdictUI.label;
+        verdictText.classList.add(verdictUI.theme);
 
-        scoreValue.textContent = score;
-        scoreRing.classList.add(themeClass);
+        verdictIcon.textContent = verdictUI.icon;
 
-        // Render details
+        scoreValue.textContent = String(score);
+        scoreRing.classList.add(verdictUI.theme);
+
+        // Render reasons
         detailsList.innerHTML = '';
 
-        // Reasons
-        if (reasons && reasons.length > 0) {
-            reasons.forEach(r => {
+        if (Array.isArray(reasons) && reasons.length > 0) {
+            for (const reason of reasons) {
                 const item = document.createElement('div');
                 item.className = 'detail-item';
-                item.innerHTML = `<span>${r}</span>`;
+                item.textContent = reason;
                 detailsList.appendChild(item);
-            });
+            }
         } else {
             const item = document.createElement('div');
             item.className = 'detail-item';
