@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderResult(data) {
-        const { score, verdict, reasons, details } = data;
+        const { score, verdict, reasons } = data;
 
         // Reset classes
         verdictText.className = '';
