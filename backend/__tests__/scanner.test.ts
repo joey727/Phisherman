@@ -1,25 +1,37 @@
 import { analyzeUrl } from "../src/Scanner";
 
-jest.mock("../src/checkers/openphish", () => ({
-  checkOpenPhish: async () => ({ score: 100, reason: "OpenPhish hit" }),
-}));
-
-jest.mock("../src/checkers/urlHaus", () => ({
-  checkURLHaus: async () => ({ score: 0 }),
-}));
-
 jest.mock("../src/checkers/heuristics", () => ({
-  runHeuristics: () => ({
-    score: 30,
-    reasons: ["Suspicious keywords"],
-  }),
+  heuristicCheck: jest.fn(async () => ({
+    score: 80,
+    verdict: "suspicious",
+    reasons: ["Suspicious domain"],
+    details: {},
+  })),
+}));
+
+jest.mock("../src/checkers/googleSafeBrowsing", () => ({
+  checkSafeBrowsing: jest.fn(async () => ({
+    score: 20,
+    verdict: "phishing",
+    reasons: ["Google Safe Browsing hit"],
+    details: {},
+  })),
+}));
+
+jest.mock("../src/checkers/phishtank", () => ({
+  checkPhishTank: jest.fn(async () => ({
+    score: 0,
+    verdict: "safe",
+    reasons: [],
+    details: {},
+  })),
 }));
 
 describe("Scanner aggregation", () => {
   test("returns phishing verdict for high score", async () => {
     const result = await analyzeUrl("http://bad-site.com");
 
-    expect(result.verdict).toBe("danger");
+    expect(result.verdict).toBe("phishing");
     expect(result.score).toBeGreaterThanOrEqual(80);
   });
 });

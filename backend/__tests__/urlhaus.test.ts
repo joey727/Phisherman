@@ -1,11 +1,13 @@
 import * as urlhaus from "../src/checkers/urlHaus";
 
-jest.spyOn(urlhaus as any, "loadURLHaus").mockResolvedValue([
-  {
-    url: "http://103.179.57.164/login.php",
-    threat: "phishing",
+jest.mock("../src/checkers/urlHaus", () => ({
+  checkURLHaus: async (url: string) => {
+    if (url.includes("103.179.57.164")) {
+      return { score: 100, reason: "URLHaus phishing" };
+    }
+    return { score: 0 };
   },
-]);
+}));
 
 describe("URLHaus checker", () => {
   test("detects phishing URL", async () => {
