@@ -3,6 +3,36 @@
 // IMPORTANT: keep auto-scan optional in UI. This service worker is intentionally minimal.
 const BACKEND_URL = 'http://localhost:4000/api/check';
 
+// intercept navigation
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    if (details.frameId !== 0) return; // only main frame
+
+    const url = details.url;
+    if (!url.startsWith("http")) return;
+
+    // Avoid infinite loop
+    if (url.includes("warning.html")) return;
+    try {
+        const verdict = await analyzeUrl(url);
+
+        if (verdict.verdict === "danger") {
+        // Store blocked URL
+        await chrome.storage.session.set({
+            blockedUrl: url,
+            verdict
+        });
+
+        // Redirect to warning page
+        chrome.tabs.update(details.tabId, {
+            url: chrome.runtime.getURL("warning.html")
+        });
+        }
+    } catch (err) {
+        console.error("Background analysis failed:", err);
+    }
+});
+
+
 // 1. Listen for messages from the popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'ANALYZE_URL') {
@@ -21,7 +51,7 @@ async function handleAnalyzeUrl(url) {
 
         const res = await fetch(BACKEND_URL, {
             method: 'POST',
-            headers,
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url })
         });
 
