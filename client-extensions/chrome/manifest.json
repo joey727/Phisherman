@@ -16,12 +16,14 @@
     }
   },
   "background": {
-    "service_worker": "src/service-worker.js"
+    "service_worker": "src/service-worker.js",
+    "type": "module"
   },
   "permissions": [
     "tabs",
     "storage",
-    "notifications"
+    "notifications",
+    "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"
