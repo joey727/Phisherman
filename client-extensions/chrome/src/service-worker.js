@@ -15,7 +15,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     try {
         const verdict = await analyzeUrl(url);
 
-        if (verdict.verdict === "danger") {
+        if (verdict.verdict === "phishing") {
         // Store blocked URL
         await chrome.storage.session.set({
             blockedUrl: url,
