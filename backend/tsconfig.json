@@ -3,17 +3,14 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "node",
-
     "rootDir": "src",
     "outDir": "dist",
-
     "strict": true,
     "skipLibCheck": true,
-
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],          // include DOM if using URL in frontend context
+    "types": ["node"],                 // include Node types
     "resolveJsonModule": true
   },
   "include": ["src"],

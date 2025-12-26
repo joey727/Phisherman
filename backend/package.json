@@ -18,13 +18,14 @@
     "express": "^5.1.0",
     "got": "^14.6.5",
     "tldts": "^7.0.19",
-    "whois-json": "^2.0.4",
-    "@types/node": "^24.10.4"
+    "whois-json": "^2.0.4"
   },
   "devDependencies": {
+    "@types/axios": "^0.9.36",
     "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.5",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.3",
     "@types/whois-json": "^2.0.4",
     "jest": "^30.2.0",
     "nodemon": "^3.1.11",
