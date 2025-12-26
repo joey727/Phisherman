@@ -3,45 +3,6 @@
 // IMPORTANT: keep auto-scan optional in UI. This service worker is intentionally minimal.
 const BACKEND_URL = 'http://localhost:4000/api/check';
 
-// intercept navigation
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-    if (details.frameId !== 0) return; // only main frame
-
-    const url = details.url;
-    if (!url.startsWith("http")) return;
-
-    // Avoid infinite loop
-    if (url.includes("warning.html")) return;
-    try {
-        const verdict = await analyzeUrl(url);
-
-        if (verdict.verdict === "phishing") {
-        // Store blocked URL
-        await chrome.storage.session.set({
-            blockedUrl: url,
-            verdict
-        });
-
-        // Redirect to warning page
-        chrome.tabs.update(details.tabId, {
-            url: chrome.runtime.getURL("warning.html")
-        });
-        }
-    } catch (err) {
-        console.error("Background analysis failed:", err);
-    }
-});
-
-
-// 1. Listen for messages from the popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'ANALYZE_URL') {
-        handleAnalyzeUrl(message.url)
-            .then(sendResponse)
-            .catch(err => sendResponse({ success: false, error: err.message }));
-        return true; // Keep the message channel open for async response
-    }
-});
 
 async function handleAnalyzeUrl(url) {
     try {
@@ -66,6 +27,48 @@ async function handleAnalyzeUrl(url) {
         throw err;
     }
 }
+
+// intercept navigation
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    if (details.frameId !== 0) return; // only main frame
+
+    const url = details.url;
+    if (!url.startsWith("http")) return;
+
+    // Avoid infinite loop
+    if (url.includes("warning.html")) return;
+    try {
+        const verdict = await handleAnalyzeUrl(url);
+
+        if (verdict.data.verdict === 'phishing' || verdict.data === 'phishing') {
+        // Store blocked URL
+        await chrome.storage.session.set({
+            blockedUrl: url,
+            verdict
+        });
+
+        // Redirect to warning page
+        chrome.tabs.update(details.tabId, {
+            url: chrome.runtime.getURL("src/warning.html")
+        });
+        }
+    } catch (err) {
+        console.error("Background analysis failed:", err);
+    }
+});
+
+
+// 1. Listen for messages from the popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'ANALYZE_URL') {
+        handleAnalyzeUrl(message.url)
+            .then(sendResponse)
+            .catch(err => sendResponse({ success: false, error: err.message }));
+        return true; // Keep the message channel open for async response
+    }
+});
+
+
 
 // 2. Also keep the auto-scan logic if desired, or reuse the helper
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
