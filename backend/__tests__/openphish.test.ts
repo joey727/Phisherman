@@ -1,6 +1,6 @@
 import { checkOpenPhish } from "../src/checkers/openPhish";
 
-jest.mock("../src/checkers/openphish", () => ({
+jest.mock("../src/checkers/openPhish", () => ({
   checkOpenPhish: async (url: string) => {
     if (url.includes("bad-site")) {
       return { score: 100, reason: "OpenPhish hit" };
