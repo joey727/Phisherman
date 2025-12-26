@@ -1,4 +1,4 @@
-import { checkOpenPhish } from "../src/checkers/openphish";
+import { checkOpenPhish } from "../src/checkers/openPhish";
 
 jest.mock("../src/checkers/openphish", () => ({
   checkOpenPhish: async (url: string) => {

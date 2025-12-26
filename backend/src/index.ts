@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import { analyzeUrl } from "./Scanner";
 
@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-app.post("/api/check", async (req, res) => {
+app.post("/api/check", async (req: Request, res: Response) => {
   const { url } = req.body;
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "Missing 'url' in body" });

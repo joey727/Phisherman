@@ -22,7 +22,7 @@ const PRIVATE_IPV6 = [
 // Check if an IP is private
 function isPrivateIP(ip: string): boolean {
   if (isIP(ip) === 4) {
-    return PRIVATE_IP_RANGES.some((r) => r.test(ip));
+    return PRIVATE_IP_RANGES.some((r: RegExp) => r.test(ip));
   }
   if (isIP(ip) === 6) {
     return PRIVATE_IPV6.some((r) => r.test(ip.toLowerCase()));
