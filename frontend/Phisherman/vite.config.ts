@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   preview: {
     host: true,
-    allowedHosts: 'all' as unknown as string[]
+    allowedHosts: ["phisherman.up.railway.app", "all"]
   }
 })
