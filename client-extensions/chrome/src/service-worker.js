@@ -1,7 +1,7 @@
 // Simple example: when a tab is updated, query backend and create a notification on phishing verdict.
 //
 // IMPORTANT: keep auto-scan optional in UI. This service worker is intentionally minimal.
-const BACKEND_URL = 'http://localhost:4000/api/check';
+const BACKEND_URL = 'https://phisherman-5r1o.onrender.com/api/check';
 
 
 async function handleAnalyzeUrl(url) {
