@@ -9,10 +9,10 @@ export function Download() {
 
         <div className="cta-group">
           <button className="cta-button primary">
-            <span className="icon">⬇</span> Add to Chrome
+            <span className="icon"></span> Add to Chrome
           </button>
           <button className="cta-button secondary">
-            <span className="icon">🦊</span> Add to Firefox
+            <span className="icon"></span> Add to Firefox
           </button>
         </div>
       </div>

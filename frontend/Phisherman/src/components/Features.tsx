@@ -5,17 +5,14 @@ export function Features() {
     {
       title: "Advanced Analysis",
       desc: "Smart algorithms analyze URL patterns and content in real-time.",
-      icon: "🔍"
     },
     {
       title: "Instant Verdict",
       desc: "Get immediate results. Safe, Suspicious, or Phishing.",
-      icon: "⚡"
     },
     {
       title: "Privacy First",
       desc: "We don't track your history. Your safety is our only priority.",
-      icon: "🛡️"
     }
   ];
 
@@ -25,7 +22,6 @@ export function Features() {
         <div className="features-grid">
           {features.map((f, i) => (
             <div key={i} className="feature-card glass-panel">
-              <div className="feature-icon">{f.icon}</div>
               <h3 className="feature-title">{f.title}</h3>
               <p className="feature-desc">{f.desc}</p>
             </div>
@@ -48,10 +44,6 @@ export function Features() {
         .feature-card:hover {
           transform: translateY(-5px);
           background: var(--color-surface-hover);
-        }
-        .feature-icon {
-          font-size: 2.5rem;
-          margin-bottom: 1rem;
         }
         .feature-title {
           font-size: 1.25rem;
