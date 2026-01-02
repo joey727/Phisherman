@@ -62,6 +62,21 @@ body {
   flex-direction: column;
 }
 
+.app {
+  opacity: 1;
+  transition: opacity 0.8s ease-in-out;
+}
+
+.app.loading {
+  opacity: 0;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.app.loaded {
+  opacity: 1;
+}
+
 /* Utilities */
 .container {
   max-width: 1200px;
