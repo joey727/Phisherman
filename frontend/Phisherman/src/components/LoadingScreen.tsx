@@ -11,7 +11,7 @@ export const LoadingScreen: React.FC = () => {
                 <div className="progress-bar-container">
                     <div className="progress-bar"></div>
                 </div>
-                <p className="loading-subtitle">Securing your journey...</p>
+                <p className="loading-subtitle">staying secured...</p>
             </div>
         </div>
     );
