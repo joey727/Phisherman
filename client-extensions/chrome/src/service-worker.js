@@ -28,6 +28,9 @@ async function handleAnalyzeUrl(url) {
     }
 }
 
+// Session-based whitelist to avoid re-scanning the same URL
+const sessionWhitelist = new Set();
+
 // intercept navigation
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     if (details.frameId !== 0) return; // only main frame
@@ -35,36 +38,50 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     const url = details.url;
     if (!url.startsWith("http")) return;
 
-    // Avoid infinite loop
+    // Exclude internal/extension pages
+    if (url.includes(chrome.runtime.id)) return;
     if (url.includes("warning.html")) return;
-    try {
-        const verdict = await handleAnalyzeUrl(url);
 
-        if (verdict.data.verdict === 'phishing' || verdict.data === 'phishing') {
-        // Store blocked URL
-        await chrome.storage.session.set({
-            blockedUrl: url,
-            verdict
-        });
+    // Check if scans are enabled
+    const cfg = await chrome.storage.sync.get(['autoscans_enabled']);
+    if (!cfg.autoscans_enabled) return;
 
-        // Redirect to warning page
-        chrome.tabs.update(details.tabId, {
-            url: chrome.runtime.getURL("src/warning.html")
-        });
+    // Check whitelist
+    if (sessionWhitelist.has(url)) return;
+
+    // Background Scan (Non-blocking)
+    handleAnalyzeUrl(url).then(result => {
+        if (result && result.data && (result.data.verdict === 'phishing' || result.data === 'phishing')) {
+            // Threat detected, redirect the tab to warning page
+            chrome.tabs.update(details.tabId, {
+                url: chrome.runtime.getURL(`src/warning.html?url=${encodeURIComponent(url)}`)
+            });
+        } else {
+            // URL is safe, whitelist it for the rest of the session
+            sessionWhitelist.add(url);
         }
-    } catch (err) {
-        console.error("Background analysis failed:", err);
-    }
+    }).catch(err => {
+        console.error("Background scan failed:", err);
+    });
 });
 
 
-// 1. Listen for messages from the popup
+// 1. Listen for messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'ANALYZE_URL') {
         handleAnalyzeUrl(message.url)
             .then(sendResponse)
             .catch(err => sendResponse({ success: false, error: err.message }));
         return true; // Keep the message channel open for async response
+    }
+
+    if (message.type === 'WHITELIST_URL') {
+        if (message.url) {
+            sessionWhitelist.add(message.url);
+            sendResponse({ success: true });
+        } else {
+            sendResponse({ success: false });
+        }
     }
 });
 
@@ -78,6 +95,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
         const cfg = await chrome.storage.sync.get(['autoscans_enabled']);
         if (!cfg.autoscans_enabled) return;
+
+        // Skip if already scanned/whitelisted this session
+        if (sessionWhitelist.has(url)) return;
 
         // Reuse the same helper logic, but we don't need to send a response anywhere
         // We just notify if phishing
