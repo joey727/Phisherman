@@ -49,15 +49,12 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     // Check whitelist
     if (sessionWhitelist.has(url)) return;
 
-    // Background Scan (Non-blocking)
     handleAnalyzeUrl(url).then(result => {
         if (result && result.data && (result.data.verdict === 'phishing' || result.data === 'phishing')) {
-            // Threat detected, redirect the tab to warning page
             chrome.tabs.update(details.tabId, {
                 url: chrome.runtime.getURL(`src/warning.html?url=${encodeURIComponent(url)}`)
             });
         } else {
-            // URL is safe, whitelist it for the rest of the session
             sessionWhitelist.add(url);
         }
     }).catch(err => {
@@ -66,7 +63,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 });
 
 
-// 1. Listen for messages
+// Listen for messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'ANALYZE_URL') {
         handleAnalyzeUrl(message.url)
@@ -87,7 +84,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 
-// 2. Also keep the auto-scan logic if desired, or reuse the helper
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     try {
         if (!changeInfo.url) return;
@@ -99,8 +95,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         // Skip if already scanned/whitelisted this session
         if (sessionWhitelist.has(url)) return;
 
-        // Reuse the same helper logic, but we don't need to send a response anywhere
-        // We just notify if phishing
         const result = await handleAnalyzeUrl(url);
         if (result.data && result.data.verdict === 'phishing') {
             chrome.notifications.create({
@@ -111,7 +105,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             });
         }
     } catch (err) {
-        // silent failure in service worker auto-scan
         console.error('Phisherman worker error', err);
     }
 });
