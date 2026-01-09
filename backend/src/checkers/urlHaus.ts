@@ -11,30 +11,25 @@ export async function loadURLHaus() {
     const cacheExpired = !lastUpdate || (Date.now() - Number(lastUpdate) > 3600 * 1000);
 
     if (cacheExpired) {
-      console.log("URLHaus cache expired or missing. Refreshing Redis...");
       const response = await axios.get(FEED, {
         timeout: 30000,
-        responseType: "stream",
         headers: { "User-Agent": "PhishermanScanner/1.0" },
       });
 
-      let data = "";
-      for await (const chunk of response.data) {
-        data += chunk.toString();
-      }
-
-      const json = JSON.parse(data);
-      const urls: string[] = (json.urls || []).map((entry: any) => entry.url);
+      const json = response.data;
+      const urls: string[] = Object.values(json)
+        .flatMap((entries: any) => (Array.isArray(entries) ? entries : [entries]))
+        .map((entry: any) => entry.url)
+        .filter(Boolean);
 
       if (urls.length > 0) {
-        // Clear existing set and repopulate
         await redis.del(REDIS_KEY_BLACKLIST);
 
-        // Redis handle large sets well, but we should batch SADD calls
+        // Batch SADD calls for efficiency
         const batchSize = 1000;
         for (let i = 0; i < urls.length; i += batchSize) {
           const batch = urls.slice(i, i + batchSize);
-          await (redis.sadd as any)(REDIS_KEY_BLACKLIST, ...batch);
+          await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...batch);
         }
         await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
         console.log(`URLHaus Redis cache populated with ${urls.length} entries.`);
