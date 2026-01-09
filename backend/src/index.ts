@@ -1,10 +1,13 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { analyzeUrl } from "./Scanner";
+import { apiLimiter } from "./middleware/ratelimit";
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json());
 app.use(cors());
+app.use(apiLimiter);
 
 app.post("/api/check", async (req: Request, res: Response) => {
   const { url } = req.body;
