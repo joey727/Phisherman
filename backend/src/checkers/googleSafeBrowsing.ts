@@ -29,7 +29,7 @@ export async function checkSafeBrowsing(url: string) {
 
     console.log("safe browsing response: ", r.data);
 
-    if (r.data?.matches) {
+    if (Array.isArray(r.data?.matches) && r.data.matches.length > 0) {
       return {
         score: 50,
         reason: "Google Safe Browsing flagged this URL as dangerous",
@@ -38,7 +38,7 @@ export async function checkSafeBrowsing(url: string) {
 
     return { score: 0 };
   } catch (err: any) {
-    console.error("safe browsing error: ", err.r?.data || err.message); 
+    console.error("safe browsing error: ", err.response?.data || err.message);
     return { score: 0 }
   }
 }
