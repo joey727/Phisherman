@@ -17,7 +17,14 @@ export async function loadPhishTank() {
 
     if (cacheExpired) {
       console.log("PhishTank cache expired or missing. Refreshing Redis...");
-      const response = await axios.get(process.env.PHISHTANK_API_URL!, {
+      let apiUrl = process.env.PHISHTANK_API_URL!;
+      if (!apiUrl.includes("format=json")) {
+        apiUrl += (apiUrl.includes("?") ? "&" : "?") + "format=json";
+      }
+
+      console.log(`Fetching PhishTank from: ${apiUrl}`);
+
+      const response = await axios.get(apiUrl, {
         timeout: 60000,
         headers: { "User-Agent": "phishtank/PhishermanScanner" },
         responseType: "arraybuffer", // Important for receiving binary data
@@ -29,17 +36,27 @@ export async function loadPhishTank() {
       console.log(`PhishTank API status: ${response.status}`);
       let data: any;
       const buffer = Buffer.from(response.data);
+      let rawString = "";
 
       // Check for GZIP magic numbers (1f 8b)
       if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
         console.log("Decompressing PhishTank GZIP data...");
-        const decompressed = pako.inflate(new Uint8Array(buffer), { to: "string" });
-        data = JSON.parse(decompressed);
+        rawString = pako.inflate(new Uint8Array(buffer), { to: "string" });
       } else {
-        data = JSON.parse(buffer.toString());
+        rawString = buffer.toString();
+      }
+
+      try {
+        data = JSON.parse(rawString);
+        console.log(`PhishTank parsed successfully. Total entries: ${Array.isArray(data) ? data.length : 0}`);
+      } catch (parseError) {
+        console.error("Failed to parse PhishTank response as JSON.");
+        console.error(`First 200 chars of response: ${rawString.substring(0, 200)}`);
+        throw new Error(`PhishTank API returned invalid JSON: ${parseError}`);
       }
 
       if (Array.isArray(data) && data.length > 0) {
+        console.log("PhishTank Sample Entry:", JSON.stringify(data[0], null, 2));
         const urls: string[] = [];
         const hosts: Set<string> = new Set();
 
