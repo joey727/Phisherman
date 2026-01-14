@@ -27,6 +27,33 @@ jest.mock("../src/checkers/phishtank", () => ({
   })),
 }));
 
+jest.mock("../src/checkers/urlHaus", () => ({
+  checkURLHaus: jest.fn(async () => ({
+    score: 0,
+    verdict: "safe",
+    reasons: [],
+    details: {},
+  })),
+}));
+
+jest.mock("../src/checkers/googleWebRisk", () => ({
+  checkGoogleWebRisk: jest.fn(async () => ({
+    score: 0,
+    verdict: "safe",
+    reasons: [],
+    details: {},
+  })),
+}));
+
+jest.mock("../src/checkers/openPhish", () => ({
+  checkOpenPhish: jest.fn(async () => ({
+    score: 0,
+    verdict: "safe",
+    reasons: [],
+    details: {},
+  })),
+}));
+
 describe("Scanner aggregation", () => {
   test("returns phishing verdict for high score", async () => {
     const result = await analyzeUrl("http://bad-site.com");
