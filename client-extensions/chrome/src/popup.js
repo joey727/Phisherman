@@ -74,13 +74,13 @@ document.addEventListener('DOMContentLoaded', () => {
         let title = 'Site is secure';
         let sub = 'Phisherman has not found any threats';
 
-        if (verdict === 'danger') {
+        if (verdict === 'phishing') {
             colorClass = 'danger';
             badgeColor = 'bg-danger';
             badgeIcon = ICONS.alert;
             title = 'Site is dangerous';
             sub = 'Phisherman recommends leaving immediately';
-        } else if (verdict === 'warning') {
+        } else if (verdict === 'suspicious') {
             colorClass = 'warning';
             badgeColor = 'bg-warning';
             badgeIcon = ICONS.alert;
