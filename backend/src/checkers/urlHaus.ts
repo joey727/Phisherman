@@ -1,4 +1,5 @@
 import axios from "axios";
+import { URL } from "node:url";
 import redis from "../utils/redis";
 
 const FEED = "https://urlhaus.abuse.ch/downloads/json_recent/";
@@ -19,7 +20,7 @@ export async function loadURLHaus() {
       const json = response.data;
       const urls: string[] = Object.values(json)
         .flatMap((entries: any) => (Array.isArray(entries) ? entries : [entries]))
-        .map((entry: any) => entry.url)
+        .map((entry: any) => normalize(entry.url))
         .filter(Boolean);
 
       if (urls.length > 0) {
@@ -52,7 +53,9 @@ export async function checkURLHaus(url: string) {
       loadURLHaus().catch(e => console.error("Background URLHaus refresh failed:", e));
     }
 
-    const isMember = await redis.sismember(REDIS_KEY_BLACKLIST, url);
+    // Normalize URL before checking
+    const normalizedUrl = normalize(url);
+    const isMember = await redis.sismember(REDIS_KEY_BLACKLIST, normalizedUrl);
 
     if (isMember) {
       return {
@@ -65,4 +68,18 @@ export async function checkURLHaus(url: string) {
   }
 
   return { score: 0 };
+}
+
+function normalize(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    // Normalize hostname and remove trailing slash from path
+    let normalized = u.href;
+    if (u.pathname.endsWith("/") && u.pathname.length > 1) {
+      normalized = normalized.slice(0, -1);
+    }
+    return normalized;
+  } catch {
+    return urlStr;
+  }
 }
