@@ -126,14 +126,14 @@ export async function checkPhishTank(url: string) {
     }
 
     // Hostname Match
-    // const targetHost = normalize(url);
-    // const isHostMember = await redis.sismember(REDIS_KEY_HOSTS, targetHost);
-    // if (isHostMember) {
-    //   return {
-    //     score: 100,
-    //     reason: "Domain match in PhishTank (phishing host)",
-    //   };
-    // }
+    const targetHost = normalize(url);
+    const isHostMember = await redis.sismember(REDIS_KEY_HOSTS, targetHost);
+    if (isHostMember) {
+      return {
+        score: 100,
+        reason: "Domain match in PhishTank (phishing host)",
+      };
+    }
 
   } catch (err) {
     console.error("PhishTank check error:", err);
