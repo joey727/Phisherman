@@ -7,7 +7,7 @@ import pako from "pako";
 dotenv.config();
 
 const REDIS_KEY_URLS = "phishtank_urls";
-const REDIS_KEY_HOSTS = "phishtank_hosts";
+// const REDIS_KEY_HOSTS = "phishtank_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishtank_last_update";
 
 export async function loadPhishTank() {
@@ -74,19 +74,15 @@ export async function loadPhishTank() {
           });
 
           if (urls.length > 0) {
-            await redis.del(REDIS_KEY_URLS, REDIS_KEY_HOSTS);
+            await redis.del(REDIS_KEY_URLS);
 
             const batchSize = 1000;
             for (let i = 0; i < urls.length; i += batchSize) {
               await (redis as any).sadd(REDIS_KEY_URLS, ...urls.slice(i, i + batchSize));
             }
-            const hostArray = Array.from(hosts);
-            for (let i = 0; i < hostArray.length; i += batchSize) {
-              await (redis as any).sadd(REDIS_KEY_HOSTS, ...hostArray.slice(i, i + batchSize));
-            }
 
             await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-            console.log(`PhishTank Redis cache populated: ${urls.length} URLs, ${hostArray.length} Hosts.`);
+            console.log(`PhishTank Redis cache populated: ${urls.length} URLs.`);
           }
         }
       } catch (err) {
@@ -126,14 +122,14 @@ export async function checkPhishTank(url: string) {
     }
 
     // Hostname Match
-    const targetHost = normalize(url);
-    const isHostMember = await redis.sismember(REDIS_KEY_HOSTS, targetHost);
-    if (isHostMember) {
-      return {
-        score: 100,
-        reason: "Domain match in PhishTank (phishing host)",
-      };
-    }
+    // const targetHost = normalize(url);
+    // const isHostMember = await redis.sismember(REDIS_KEY_HOSTS, targetHost);
+    // if (isHostMember) {
+    //   return {
+    //     score: 100,
+    //     reason: "Domain match in PhishTank (phishing host)",
+    //   };
+    // }
 
   } catch (err) {
     console.error("PhishTank check error:", err);
