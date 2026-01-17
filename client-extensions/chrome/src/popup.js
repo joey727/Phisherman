@@ -21,11 +21,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailsList = document.getElementById('details-list');
 
     const retryBtn = document.getElementById('retry-btn');
+    const settingsBtn = document.getElementById('settings-btn');
 
     // Initialize Analysis
     init();
 
     retryBtn.addEventListener('click', () => init());
+
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => {
+            if (chrome.runtime.openOptionsPage) {
+                chrome.runtime.openOptionsPage();
+            } else {
+                window.open(chrome.runtime.getURL('src/options.html'));
+            }
+        });
+    }
 
     async function init() {
         loadingView.classList.remove('hidden');
