@@ -27,11 +27,11 @@ export async function loadPhishTank() {
 
       try {
         const response = await axios.get(apiUrl, {
-          timeout: 60000,
+          timeout: 30000,
           headers: { "User-Agent": "phishtank/PhishermanScanner" },
           responseType: "arraybuffer",
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
+          maxContentLength: 100 * 1024 * 1024, // allow larger feed payloads
+          maxBodyLength: 100 * 1024 * 1024,
           decompress: true
         });
 
