@@ -63,19 +63,27 @@ export async function loadPhishTank() {
               maxContentLength: 100 * 1024 * 1024, // allow larger feed payloads
               maxBodyLength: 100 * 1024 * 1024,
               decompress: true,
-              validateStatus: (status) => status >= 200 && status < 300,
+              validateStatus: () => true, // Accept all status codes, we'll check manually
             });
 
             const status = response?.status;
             if (typeof status !== "number") {
               throw new Error("PhishTank response missing status code");
             }
+
+            // Check for error status codes
+            if (status < 200 || status >= 300) {
+              console.error(`PhishTank endpoint returned status ${status} for ${candidate}`);
+              continue; // Try next candidate
+            }
+
             console.log(`PhishTank API status: ${status}`);
 
             const headers = (response as any)?.headers || {};
             const contentType = headers["content-type"] || headers["Content-Type"];
             if (contentType && contentType.startsWith("image/")) {
-              throw new Error(`Unexpected content-type from PhishTank: ${contentType}`);
+              console.error(`PhishTank endpoint returned image content-type (${contentType}) for ${candidate}`);
+              continue; // Try next candidate
             }
 
             const buffer = Buffer.from(response.data ?? []);
@@ -84,7 +92,12 @@ export async function loadPhishTank() {
               console.error(
                 `PhishTank feed too large (${buffer.length} bytes > ${MAX_FEED_BYTES}); aborting parse.`
               );
-              throw new Error("PhishTank feed exceeded maximum allowed size");
+              continue; // Try next candidate
+            }
+
+            if (buffer.length === 0) {
+              console.error(`PhishTank endpoint returned empty response for ${candidate}`);
+              continue; // Try next candidate
             }
 
             if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
@@ -101,10 +114,21 @@ export async function loadPhishTank() {
             } catch (parseError) {
               console.error("Failed to parse PhishTank response as JSON.");
               console.error(`First 200 chars of response: ${rawString.substring(0, 200)}`);
-              throw new Error(`PhishTank API returned invalid JSON: ${parseError}`);
+              // Continue to next candidate instead of throwing
+              continue;
             }
-          } catch (candidateErr) {
-            console.error(`PhishTank fetch failed for ${candidate}:`, candidateErr);
+          } catch (candidateErr: any) {
+            // Handle axios errors specifically
+            if (candidateErr?.response) {
+              const status = candidateErr.response.status;
+              const contentType = candidateErr.response.headers?.["content-type"] || candidateErr.response.headers?.["Content-Type"];
+              console.error(`PhishTank fetch failed for ${candidate}: HTTP ${status}${contentType ? ` (${contentType})` : ""}`);
+            } else if (candidateErr?.code === "ERR_BAD_REQUEST" || candidateErr?.code === "ECONNREFUSED" || candidateErr?.code === "ETIMEDOUT") {
+              console.error(`PhishTank fetch failed for ${candidate}: ${candidateErr.code}`);
+            } else {
+              console.error(`PhishTank fetch failed for ${candidate}:`, candidateErr?.message || candidateErr);
+            }
+            // Continue to next candidate
           }
         }
 
