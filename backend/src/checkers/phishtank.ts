@@ -9,6 +9,14 @@ dotenv.config();
 const REDIS_KEY_URLS = "phishtank_urls";
 // const REDIS_KEY_HOSTS = "phishtank_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishtank_last_update";
+const REDIS_KEY_LAST_FAIL = "phishtank_last_fail";
+const FAIL_COOLDOWN_MS = 15 * 60 * 1000; // back off for 15 minutes after a failed fetch
+const MAX_FEED_BYTES = 100 * 1024 * 1024; // hard cap on feed size to avoid memory blowups
+
+const DEFAULT_PHISHTANK_URLS = [
+  "https://data.phishtank.com/data/online-valid.json.gz",
+  "https://data.phishtank.com/data/online-valid.json",
+];
 
 export async function loadPhishTank() {
   try {
@@ -16,43 +24,95 @@ export async function loadPhishTank() {
     const cacheExpired = !lastUpdate || (Date.now() - Number(lastUpdate) > 3600 * 1000);
 
     if (cacheExpired) {
-      console.log("PhishTank cache expired or missing. Refreshing Redis...");
-      let apiUrl = process.env.PHISHTANK_API_URL!;
-
-      if (!apiUrl.includes("format=json")) {
-        apiUrl += (apiUrl.includes("?") ? "&" : "?") + "format=json";
+      const lastFail = await redis.get(REDIS_KEY_LAST_FAIL);
+      const failedRecently = lastFail && (Date.now() - Number(lastFail) < FAIL_COOLDOWN_MS);
+      if (failedRecently) {
+        console.log("Skipping PhishTank refresh due to recent failure cooldown.");
+        return;
       }
 
-      console.log(`Fetching PhishTank from: ${apiUrl}`);
+      console.log("PhishTank cache expired or missing. Refreshing Redis...");
+      const normalizeCandidate = (url: string) => {
+        // Only append format=json if it's not already present and the URL is not a gzipped dump.
+        if (!url.includes("format=json") && !url.endsWith(".gz")) {
+          const separator = url.includes("?") ? "&" : "?";
+          return `${url}${separator}format=json`;
+        }
+        return url;
+      };
+
+      const candidates = [
+        process.env.PHISHTANK_API_URL
+          ? normalizeCandidate(process.env.PHISHTANK_API_URL)
+          : undefined,
+        ...DEFAULT_PHISHTANK_URLS,
+      ].filter(Boolean) as string[];
 
       try {
-        const response = await axios.get(apiUrl, {
-          timeout: 30000,
-          headers: { "User-Agent": "phishtank/PhishermanScanner" },
-          responseType: "arraybuffer",
-          maxContentLength: 100 * 1024 * 1024, // allow larger feed payloads
-          maxBodyLength: 100 * 1024 * 1024,
-          decompress: true
-        });
-
-        console.log(`PhishTank API status: ${response.status}`);
         let data: any;
-        const buffer = Buffer.from(response.data);
         let rawString = "";
+        let succeeded = false;
 
-        if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
-          rawString = pako.inflate(new Uint8Array(buffer), { to: "string" });
-        } else {
-          rawString = buffer.toString();
+        for (const candidate of candidates) {
+          console.log(`Fetching PhishTank from: ${candidate}`);
+          try {
+            const response = await axios.get(candidate, {
+              timeout: 30000,
+              headers: { "User-Agent": "phishtank/PhishermanScanner" },
+              responseType: "arraybuffer",
+              maxContentLength: 100 * 1024 * 1024, // allow larger feed payloads
+              maxBodyLength: 100 * 1024 * 1024,
+              decompress: true,
+              validateStatus: (status) => status >= 200 && status < 300,
+            });
+
+            const status = response?.status;
+            if (typeof status !== "number") {
+              throw new Error("PhishTank response missing status code");
+            }
+            console.log(`PhishTank API status: ${status}`);
+
+            const headers = (response as any)?.headers || {};
+            const contentType = headers["content-type"] || headers["Content-Type"];
+            if (contentType && contentType.startsWith("image/")) {
+              throw new Error(`Unexpected content-type from PhishTank: ${contentType}`);
+            }
+
+            const buffer = Buffer.from(response.data ?? []);
+
+            if (buffer.length > MAX_FEED_BYTES) {
+              console.error(
+                `PhishTank feed too large (${buffer.length} bytes > ${MAX_FEED_BYTES}); aborting parse.`
+              );
+              throw new Error("PhishTank feed exceeded maximum allowed size");
+            }
+
+            if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
+              rawString = pako.inflate(new Uint8Array(buffer), { to: "string" });
+            } else {
+              rawString = buffer.toString();
+            }
+
+            try {
+              data = JSON.parse(rawString);
+              console.log(`PhishTank parsed successfully. Total entries: ${Array.isArray(data) ? data.length : 0}`);
+              succeeded = true;
+              break;
+            } catch (parseError) {
+              console.error("Failed to parse PhishTank response as JSON.");
+              console.error(`First 200 chars of response: ${rawString.substring(0, 200)}`);
+              throw new Error(`PhishTank API returned invalid JSON: ${parseError}`);
+            }
+          } catch (candidateErr) {
+            console.error(`PhishTank fetch failed for ${candidate}:`, candidateErr);
+          }
         }
 
-        try {
-          data = JSON.parse(rawString);
-          console.log(`PhishTank parsed successfully. Total entries: ${Array.isArray(data) ? data.length : 0}`);
-        } catch (parseError) {
-          console.error("Failed to parse PhishTank response as JSON.");
-          console.error(`First 200 chars of response: ${rawString.substring(0, 200)}`);
-          throw new Error(`PhishTank API returned invalid JSON: ${parseError}`);
+        if (!succeeded) {
+          await redis.set(REDIS_KEY_LAST_FAIL, Date.now().toString());
+          throw new Error("All PhishTank endpoints failed; backing off.");
+        } else {
+          await redis.del(REDIS_KEY_LAST_FAIL);
         }
 
         if (Array.isArray(data) && data.length > 0) {
@@ -83,6 +143,8 @@ export async function loadPhishTank() {
 
             await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
             console.log(`PhishTank Redis cache populated: ${urls.length} URLs.`);
+          } else {
+            console.warn("PhishTank response contained no URL entries; leaving cache unchanged.");
           }
         }
       } catch (err) {
