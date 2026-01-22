@@ -16,22 +16,36 @@ export async function loadOpenPhish() {
         timeout: 10000,
       });
 
-      const urls: string[] = response.data
-        .split("\n")
-        .map((x: string) => x.trim())
-        .filter((x: string) => x.length > 0);
+      const lines = response.data.split("\n");
+      let totalProcessed = 0;
 
-      if (urls.length > 0) {
+      if (lines.length > 0) {
         await redis.del(REDIS_KEY_BLACKLIST);
 
         const batchSize = 1000;
-        for (let i = 0; i < urls.length; i += batchSize) {
-          const batch = urls.slice(i, i + batchSize);
-          await (redis.sadd as any)(REDIS_KEY_BLACKLIST, ...batch);
+        const urlBatch: string[] = [];
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length > 0) {
+            urlBatch.push(trimmed);
+            
+            if (urlBatch.length >= batchSize) {
+              await (redis.sadd as any)(REDIS_KEY_BLACKLIST, ...urlBatch);
+              totalProcessed += urlBatch.length;
+              urlBatch.length = 0; // Clear array efficiently
+            }
+          }
+        }
+
+        // Write remaining URLs
+        if (urlBatch.length > 0) {
+          await (redis.sadd as any)(REDIS_KEY_BLACKLIST, ...urlBatch);
+          totalProcessed += urlBatch.length;
         }
 
         await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-        console.log(`OpenPhish Redis cache populated with ${urls.length} entries.`);
+        console.log(`OpenPhish Redis cache populated with ${totalProcessed} entries.`);
       }
     }
   } catch (err) {

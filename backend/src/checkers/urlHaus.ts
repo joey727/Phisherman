@@ -18,22 +18,42 @@ export async function loadURLHaus() {
       });
 
       const json = response.data;
-      const urls: string[] = Object.values(json)
-        .flatMap((entries: any) => (Array.isArray(entries) ? entries : [entries]))
-        .map((entry: any) => normalize(entry.url))
-        .filter(Boolean);
+      let totalProcessed = 0;
 
-      if (urls.length > 0) {
-        await redis.del(REDIS_KEY_BLACKLIST);
+      await redis.del(REDIS_KEY_BLACKLIST);
 
-        // Batch SADD calls for efficiency
-        const batchSize = 1000;
-        for (let i = 0; i < urls.length; i += batchSize) {
-          const batch = urls.slice(i, i + batchSize);
-          await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...batch);
+      // Process entries in batches to avoid large intermediate arrays
+      const batchSize = 1000;
+      const urlBatch: string[] = [];
+
+      for (const entries of Object.values(json)) {
+        const entryArray = Array.isArray(entries) ? entries : [entries];
+        
+        for (const entry of entryArray) {
+          if (entry?.url) {
+            const normalized = normalize(entry.url);
+            if (normalized) {
+              urlBatch.push(normalized);
+              
+              if (urlBatch.length >= batchSize) {
+                await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...urlBatch);
+                totalProcessed += urlBatch.length;
+                urlBatch.length = 0; // Clear array efficiently
+              }
+            }
+          }
         }
+      }
+
+      // Write remaining URLs
+      if (urlBatch.length > 0) {
+        await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...urlBatch);
+        totalProcessed += urlBatch.length;
+      }
+
+      if (totalProcessed > 0) {
         await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-        console.log(`URLHaus Redis cache populated with ${urls.length} entries.`);
+        console.log(`URLHaus Redis cache populated with ${totalProcessed} entries.`);
       }
     }
   } catch (err) {
