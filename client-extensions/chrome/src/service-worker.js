@@ -50,7 +50,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     if (sessionWhitelist.has(url)) return;
 
     handleAnalyzeUrl(url).then(result => {
-        if (result && result.data && (result.data.verdict === 'phishing' || result.data === 'phishing')) {
+        if (result && result.data && (result.data.verdict === 'phishing' || result.data.verdict === 'suspicious')) {
             chrome.tabs.update(details.tabId, {
                 url: chrome.runtime.getURL(`src/warning.html?url=${encodeURIComponent(url)}`)
             });
