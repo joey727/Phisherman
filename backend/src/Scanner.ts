@@ -16,8 +16,8 @@ export async function analyzeUrl(url: string) {
     heuristicCheck(url),
     checkOpenPhish(url),
     checkSafeBrowsing(url),
-    checkPhishTank(url),
-    checkGoogleWebRisk(url),
+    // checkPhishTank(url),
+    // checkGoogleWebRisk(url),
     checkURLHaus(url),
   ]);
 
