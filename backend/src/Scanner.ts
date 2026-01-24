@@ -8,6 +8,7 @@ import { checkURLHaus } from "./checkers/urlHaus";
 interface Check {
   score: number;
   reason?: string;
+  reasons?: string[];
 }
 
 export async function analyzeUrl(url: string) {
@@ -29,10 +30,21 @@ export async function analyzeUrl(url: string) {
   const verdict =
     totalScore >= 70 ? "phishing" : totalScore >= 40 ? "suspicious" : "safe";
 
+  // Collect all reasons
+  const allReasons: string[] = [];
+  for (const c of checks) {
+    if (c.reasons && Array.isArray(c.reasons)) {
+      allReasons.push(...c.reasons);
+    }
+    if (c.reason) {
+      allReasons.push(c.reason);
+    }
+  }
+
   return {
     url,
     score: totalScore,
     verdict,
-    reasons: checks.filter((c) => c.reason).map((c) => c.reason),
+    reasons: allReasons,
   };
 }

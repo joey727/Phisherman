@@ -20,7 +20,10 @@ export async function loadURLHaus() {
       const json = response.data;
       let totalProcessed = 0;
 
-      await redis.del(REDIS_KEY_BLACKLIST);
+      // Use a temporary key to ensure atomicity
+      const tempKey = `${REDIS_KEY_BLACKLIST}_temp`;
+      // Delete any stale temp key just in case
+      await redis.del(tempKey);
 
       // Process entries in batches to avoid large intermediate arrays
       const batchSize = 1000;
@@ -28,15 +31,15 @@ export async function loadURLHaus() {
 
       for (const entries of Object.values(json)) {
         const entryArray = Array.isArray(entries) ? entries : [entries];
-        
+
         for (const entry of entryArray) {
           if (entry?.url) {
             const normalized = normalize(entry.url);
             if (normalized) {
               urlBatch.push(normalized);
-              
+
               if (urlBatch.length >= batchSize) {
-                await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...urlBatch);
+                await (redis as any).sadd(tempKey, ...urlBatch);
                 totalProcessed += urlBatch.length;
                 urlBatch.length = 0; // Clear array efficiently
               }
@@ -47,13 +50,18 @@ export async function loadURLHaus() {
 
       // Write remaining URLs
       if (urlBatch.length > 0) {
-        await (redis as any).sadd(REDIS_KEY_BLACKLIST, ...urlBatch);
+        await (redis as any).sadd(tempKey, ...urlBatch);
         totalProcessed += urlBatch.length;
       }
 
       if (totalProcessed > 0) {
+        // Atomic swap
+        await redis.rename(tempKey, REDIS_KEY_BLACKLIST);
         await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
         console.log(`URLHaus Redis cache populated with ${totalProcessed} entries.`);
+      } else {
+        // Cleanup empty temp key if nothing processed
+        await redis.del(tempKey);
       }
     }
   } catch (err) {

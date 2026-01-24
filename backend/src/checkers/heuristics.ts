@@ -106,5 +106,5 @@ export async function heuristicCheck(url: string) {
 
   score = Math.max(0, score);
 
-  return { score, reason: reasons.join("; ") };
+  return { score, reasons };
 }
