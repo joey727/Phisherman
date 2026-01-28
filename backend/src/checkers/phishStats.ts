@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import redis from "../utils/redis";
 import { Checker, CheckResult } from "../types";
 
-const FEED = "https://phishstats.info/phish_score.csv";
+const FEED = "https://phishstats.info:2096/api/phishing?_sort=-id&_size=1000"; // Fetch last 1000 entries
 const REDIS_KEY_URLS = "phishstats_urls";
 const REDIS_KEY_HOSTS = "phishstats_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishstats_last_update";
@@ -15,9 +15,18 @@ export async function loadPhishStats() {
 
         if (cacheExpired) {
             console.log("PhishStats cache expired or missing. Refreshing Redis...");
-            const response = await axios.get(FEED, { timeout: 45000 });
+            // Add heavy user-agent to avoid blind blocking
+            const response = await axios.get(FEED, {
+                timeout: 45000,
+                headers: { "User-Agent": "Phisherman/1.0" }
+            });
 
-            const lines = response.data.split("\n");
+            const entries = response.data;
+            if (!Array.isArray(entries)) {
+                console.warn("PhishStats API returned non-array data");
+                return;
+            }
+
             const tempUrlsKey = `${REDIS_KEY_URLS}_temp`;
             const tempHostsKey = `${REDIS_KEY_HOSTS}_temp`;
 
@@ -27,22 +36,17 @@ export async function loadPhishStats() {
             const urlBatch: string[] = [];
             const hostBatch: string[] = [];
 
-            for (const line of lines) {
-                if (line.startsWith("#") || line.trim().length === 0) continue;
+            for (const entry of entries) {
+                // Entry format: { id, url, ip, ... }
+                if (!entry.url) continue;
 
-                // Format: "date","score","url","ip"
-                const parts = line.split(",");
-                if (parts.length < 3) continue;
-
-                const rawUrl = parts[2].replace(/"/g, "").trim();
-                if (rawUrl) {
-                    urlBatch.push(rawUrl);
-                    try {
-                        const u = new URL(rawUrl);
-                        hostBatch.push(u.hostname);
-                    } catch {
-                        // ignore
-                    }
+                const rawUrl = entry.url.trim();
+                urlBatch.push(rawUrl);
+                try {
+                    const u = new URL(rawUrl);
+                    hostBatch.push(u.hostname);
+                } catch {
+                    // ignore invalid URLs in feed
                 }
 
                 if (urlBatch.length >= 1000) {
@@ -61,13 +65,12 @@ export async function loadPhishStats() {
             try {
                 await (redis as any).rename(tempUrlsKey, REDIS_KEY_URLS);
                 await (redis as any).rename(tempHostsKey, REDIS_KEY_HOSTS);
-            } catch (renameErr) {
-                // Handle case where temp keys were never created (empty feed)
+            } catch (err) {
                 console.warn("PhishStats rename failed, likely empty feed data.");
             }
 
             await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-            console.log(`PhishStats Redis cache updated.`);
+            console.log(`PhishStats Redis cache updated with ${entries.length} entries.`);
         }
     } catch (err) {
         console.error("PhishStats refresh error:", err);
