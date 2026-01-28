@@ -5,6 +5,7 @@ import { SafeBrowsingChecker } from "./checkers/googleSafeBrowsing";
 import { URLHausChecker } from "./checkers/urlHaus";
 import { PhishTankChecker } from "./checkers/phishtank";
 import { WebRiskChecker } from "./checkers/googleWebRisk";
+import { PhishStatsChecker } from "./checkers/phishStats";
 import { ScanResult } from "./types";
 
 // Register all checkers
@@ -14,6 +15,7 @@ registry.register(SafeBrowsingChecker);
 registry.register(URLHausChecker);
 registry.register(PhishTankChecker);
 registry.register(WebRiskChecker);
+registry.register(PhishStatsChecker);
 
 export async function analyzeUrl(url: string): Promise<ScanResult> {
   const { checks, timing } = await registry.runAll(url);

@@ -6,7 +6,7 @@ import redis from "../utils/redis";
 import { Checker, CheckResult } from "../types";
 
 const WHOIS_CACHE_PREFIX = "whois_cache:";
-const WHOIS_CACHE_TTL = 86400 * 7; // 1 week
+const WHOIS_CACHE_TTL = 86400; // 24 hours
 
 async function whoisCheck(regDomain: string, hostname: string) {
   const reasons: string[] = [];

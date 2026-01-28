@@ -6,6 +6,7 @@ import { cacheManager } from "./CacheManager";
 import { loadURLHaus } from "./checkers/urlHaus";
 import { loadPhishTank } from "./checkers/phishtank";
 import { loadOpenPhish } from "./checkers/openPhish";
+import { loadPhishStats } from "./checkers/phishStats";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -17,6 +18,7 @@ app.use(apiLimiter);
 cacheManager.addTask("urlhaus", loadURLHaus);
 cacheManager.addTask("phishtank", loadPhishTank);
 cacheManager.addTask("openphish", loadOpenPhish);
+cacheManager.addTask("phishstats", loadPhishStats);
 cacheManager.start();
 
 app.post("/api/check", async (req: Request, res: Response) => {
