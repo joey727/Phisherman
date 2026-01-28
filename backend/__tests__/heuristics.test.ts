@@ -28,7 +28,16 @@
 //   });
 // });
 
-import { heuristicCheck } from "../src/checkers/heuristics";
+import { HeuristicsChecker } from "../src/checkers/heuristics";
+
+jest.mock("../src/utils/redis", () => ({
+  __esModule: true,
+  default: {
+    get: jest.fn(),
+    set: jest.fn(),
+    expire: jest.fn(),
+  },
+}));
 
 jest.mock("whois-json", () => {
   return jest.fn(async () => ({
@@ -39,7 +48,14 @@ jest.mock("whois-json", () => {
 
 describe("Heuristics checker", () => {
   test("returns score for suspicious URL", async () => {
-    const result = await heuristicCheck("http://login-secure-paypal.com");
+    const result = await HeuristicsChecker.check("http://login-secure-paypal.com");
     expect(result.score).toBeGreaterThan(0);
+    expect(result.reasons?.length).toBeGreaterThan(0);
+  });
+
+  test("returns high score for non-HTTPS URL", async () => {
+    const result = await HeuristicsChecker.check("http://example.com");
+    expect(result.reasons).toContain("URL is not HTTPS");
   });
 });
+

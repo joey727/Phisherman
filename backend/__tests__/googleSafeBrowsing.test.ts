@@ -1,10 +1,10 @@
 import axios from "axios";
-import { checkSafeBrowsing } from "../src/checkers/googleSafeBrowsing";
+import { SafeBrowsingChecker } from "../src/checkers/googleSafeBrowsing";
 
 jest.mock("axios");
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-describe("checkSafeBrowsing", () => {
+describe("SafeBrowsingChecker", () => {
     const apiKey = process.env.GOOGLE_SAFE_API_KEY;
 
     beforeAll(() => {
@@ -22,20 +22,19 @@ describe("checkSafeBrowsing", () => {
             }
         });
 
-        const result = await checkSafeBrowsing("http://malicious.com");
+        const result = await SafeBrowsingChecker.check("http://malicious.com");
         expect(result.score).toBe(50);
         expect(result.reason).toBeDefined();
     });
 
-    test("returns score 0 when matches is an empty array (THE BUG)", async () => {
+    test("returns score 0 when matches is an empty array", async () => {
         mockedAxios.post.mockResolvedValueOnce({
             data: {
                 matches: []
             }
         });
 
-        const result = await checkSafeBrowsing("http://safe.com");
-        // This is currently expected to fail (return 50) because of the truthy check on []
+        const result = await SafeBrowsingChecker.check("http://safe.com");
         expect(result.score).toBe(0);
     });
 
@@ -44,7 +43,8 @@ describe("checkSafeBrowsing", () => {
             data: {}
         });
 
-        const result = await checkSafeBrowsing("http://safe.com");
+        const result = await SafeBrowsingChecker.check("http://safe.com");
         expect(result.score).toBe(0);
     });
 });
+

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { loadPhishTank } from "../src/checkers/phishtank";
+import { loadPhishTank, PhishTankChecker } from "../src/checkers/phishtank";
 import redis from "../src/utils/redis";
 
 jest.mock("axios");
@@ -14,7 +14,7 @@ jest.mock("../src/utils/redis", () => ({
 
 describe("PhishTank Checker Regression Test", () => {
     const mockedAxios = axios as jest.Mocked<typeof axios>;
-    const mockedRedis = redis as jest.Mocked<typeof redis>;
+    const mockedRedis = (redis as unknown) as jest.Mocked<any>;
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -99,5 +99,26 @@ describe("PhishTank Checker Regression Test", () => {
         expect(mockedRedis.del).toHaveBeenCalled(); // Should clear old keys
         expect(mockedRedis.sadd).toHaveBeenCalled(); // Should add new URLs/Hosts
         expect(mockedRedis.set).toHaveBeenCalledWith(expect.stringContaining("phishtank_last_update"), expect.any(String));
+    });
+
+    describe("PhishTankChecker.check", () => {
+        it("should return score 100 for exact URL match", async () => {
+            mockedRedis.sismember.mockResolvedValue(1);
+            const result = await PhishTankChecker.check("http://malicious.com");
+            expect(result.score).toBe(100);
+            expect(result.reason).toContain("Exact URL match");
+        });
+
+        it("should return score 0 for no match", async () => {
+            mockedRedis.sismember.mockResolvedValue(0);
+            const result = await PhishTankChecker.check("http://safe.com");
+            expect(result.score).toBe(0);
+        });
+
+        it("should handle redis errors gracefully", async () => {
+            mockedRedis.sismember.mockRejectedValue(new Error("Redis down"));
+            const result = await PhishTankChecker.check("http://safe.com");
+            expect(result.score).toBe(0);
+        });
     });
 });
