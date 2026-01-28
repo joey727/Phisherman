@@ -216,16 +216,10 @@ function normalize(u: string): string {
   }
 }
 
-export async function checkPhishTank(url: string) {
-  try {
-    const setExists = await redis.exists(REDIS_KEY_URLS);
-    if (!setExists) {
-      await loadPhishTank();
-    } else {
-      // Trigger background refresh if needed without blocking
-      loadPhishTank().catch(e => console.error("Background PhishTank refresh failed:", e));
-    }
+import { Checker, CheckResult } from "../types";
 
+export async function checkPhishTank(url: string): Promise<CheckResult> {
+  try {
     // Exact URL Match
     const isUrlMember = await redis.sismember(REDIS_KEY_URLS, url);
     if (isUrlMember) {
@@ -235,20 +229,16 @@ export async function checkPhishTank(url: string) {
       };
     }
 
-    // Hostname Match
-    // const targetHost = normalize(url);
-    // const isHostMember = await redis.sismember(REDIS_KEY_HOSTS, targetHost);
-    // if (isHostMember) {
-    //   return {
-    //     score: 100,
-    //     reason: "Domain match in PhishTank (phishing host)",
-    //   };
-    // }
-
   } catch (err) {
     console.error("PhishTank check error:", err);
   }
 
   return { score: 0 };
 }
+
+export const PhishTankChecker: Checker = {
+  name: "phishtank",
+  check: checkPhishTank,
+};
+
 

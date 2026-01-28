@@ -1,11 +1,10 @@
 import axios from "axios";
 import dotenv from "dotenv";
+import { Checker, CheckResult } from "../types";
 
 dotenv.config();
 
-
-export async function checkSafeBrowsing(url: string) {
-
+export async function checkSafeBrowsing(url: string): Promise<CheckResult> {
   try {
     const api_key = process.env.GOOGLE_SAFE_API_KEY;
 
@@ -27,8 +26,6 @@ export async function checkSafeBrowsing(url: string) {
       }
     );
 
-    console.log("safe browsing response: ", r.data);
-
     if (Array.isArray(r.data?.matches) && r.data.matches.length > 0) {
       return {
         score: 50,
@@ -42,3 +39,9 @@ export async function checkSafeBrowsing(url: string) {
     return { score: 0 }
   }
 }
+
+export const SafeBrowsingChecker: Checker = {
+  name: "google_safe_browsing",
+  check: checkSafeBrowsing,
+};
+

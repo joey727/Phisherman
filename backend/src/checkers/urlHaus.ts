@@ -1,6 +1,7 @@
 import axios from "axios";
 import { URL } from "node:url";
 import redis from "../utils/redis";
+import { Checker, CheckResult } from "../types";
 
 const FEED = "https://urlhaus.abuse.ch/downloads/json_recent/";
 const REDIS_KEY_BLACKLIST = "urlhaus_blacklist";
@@ -69,18 +70,8 @@ export async function loadURLHaus() {
   }
 }
 
-export async function checkURLHaus(url: string) {
+export async function checkURLHaus(url: string): Promise<CheckResult> {
   try {
-    // Ensure background refresh is handled (don't await on every check for speed, 
-    // unless the set is totally empty)
-    const setExists = await redis.exists(REDIS_KEY_BLACKLIST);
-    if (!setExists) {
-      await loadURLHaus();
-    } else {
-      // Trigger background refresh if needed without blocking
-      loadURLHaus().catch(e => console.error("Background URLHaus refresh failed:", e));
-    }
-
     // Normalize URL before checking
     const normalizedUrl = normalize(url);
     const isMember = await redis.sismember(REDIS_KEY_BLACKLIST, normalizedUrl);
@@ -97,6 +88,12 @@ export async function checkURLHaus(url: string) {
 
   return { score: 0 };
 }
+
+export const URLHausChecker: Checker = {
+  name: "urlhaus",
+  check: checkURLHaus,
+};
+
 
 function normalize(urlStr: string): string {
   try {

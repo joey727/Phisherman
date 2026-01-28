@@ -1,5 +1,6 @@
 import axios from "axios";
 import redis from "../utils/redis";
+import { Checker, CheckResult } from "../types";
 
 const FEED = "https://openphish.com/feed.txt";
 const REDIS_KEY_BLACKLIST = "openphish_blacklist";
@@ -29,7 +30,7 @@ export async function loadOpenPhish() {
           const trimmed = line.trim();
           if (trimmed.length > 0) {
             urlBatch.push(trimmed);
-            
+
             if (urlBatch.length >= batchSize) {
               await (redis.sadd as any)(REDIS_KEY_BLACKLIST, ...urlBatch);
               totalProcessed += urlBatch.length;
@@ -53,15 +54,8 @@ export async function loadOpenPhish() {
   }
 }
 
-export async function checkOpenPhish(url: string) {
+export async function checkOpenPhish(url: string): Promise<CheckResult> {
   try {
-    const setExists = await redis.exists(REDIS_KEY_BLACKLIST);
-    if (!setExists) {
-      await loadOpenPhish();
-    } else {
-      loadOpenPhish().catch(e => console.error("Background OpenPhish refresh failed:", e));
-    }
-
     const isMember = await redis.sismember(REDIS_KEY_BLACKLIST, url);
 
     if (isMember) {
@@ -73,3 +67,9 @@ export async function checkOpenPhish(url: string) {
 
   return { score: 0 };
 }
+
+export const OpenPhishChecker: Checker = {
+  name: "openphish",
+  check: checkOpenPhish,
+};
+

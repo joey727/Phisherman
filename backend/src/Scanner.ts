@@ -1,26 +1,22 @@
-import { checkPhishTank } from "./checkers/phishtank";
-import { checkSafeBrowsing } from "./checkers/googleSafeBrowsing";
-import { heuristicCheck } from "./checkers/heuristics";
-import { checkOpenPhish } from "./checkers/openPhish";
-import { checkGoogleWebRisk } from "./checkers/googleWebRisk";
-import { checkURLHaus } from "./checkers/urlHaus";
+import { registry } from "./CheckerRegistry";
+import { HeuristicsChecker } from "./checkers/heuristics";
+import { OpenPhishChecker } from "./checkers/openPhish";
+import { SafeBrowsingChecker } from "./checkers/googleSafeBrowsing";
+import { URLHausChecker } from "./checkers/urlHaus";
+import { PhishTankChecker } from "./checkers/phishtank";
+import { WebRiskChecker } from "./checkers/googleWebRisk";
+import { ScanResult } from "./types";
 
-interface Check {
-  score: number;
-  reason?: string;
-  reasons?: string[];
-}
+// Register all checkers
+registry.register(HeuristicsChecker);
+registry.register(OpenPhishChecker);
+registry.register(SafeBrowsingChecker);
+registry.register(URLHausChecker);
+registry.register(PhishTankChecker);
+registry.register(WebRiskChecker);
 
-export async function analyzeUrl(url: string) {
-
-  const checks: Check[] = await Promise.all([
-    heuristicCheck(url),
-    checkOpenPhish(url),
-    checkSafeBrowsing(url),
-    // checkPhishTank(url),
-    // checkGoogleWebRisk(url),
-    checkURLHaus(url),
-  ]);
+export async function analyzeUrl(url: string): Promise<ScanResult> {
+  const { checks, timing } = await registry.runAll(url);
 
   const totalScore = Math.min(
     100,
@@ -46,5 +42,7 @@ export async function analyzeUrl(url: string) {
     score: totalScore,
     verdict,
     reasons: allReasons,
+    executionTimeMs: timing,
   };
 }
+

@@ -1,11 +1,12 @@
 import axios from "axios";
 import dotenv from "dotenv";
+import { Checker, CheckResult } from "../types";
 
 dotenv.config();
 
 const WEBRISK_ENDPOINT = "https://webrisk.googleapis.com/v1/uris:search";
 
-export async function checkGoogleWebRisk(url: string) {
+export async function checkGoogleWebRisk(url: string): Promise<CheckResult> {
   const apiKey = process.env.WEBRISK_API_KEY;
 
   if (!apiKey) {
@@ -33,10 +34,15 @@ export async function checkGoogleWebRisk(url: string) {
     return {
       score: 90,
       reason: "Google WebRisk threat detected",
-      details: r.data,
     };
   } catch (err: any) {
     console.error("WebRisk error:", err.response?.data || err.message);
     return { score: 0 }; // fail open (non-blocking)
   }
 }
+
+export const WebRiskChecker: Checker = {
+  name: "google_web_risk",
+  check: checkGoogleWebRisk,
+};
+

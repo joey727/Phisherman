@@ -2,17 +2,37 @@ import { URL } from "node:url";
 import { parse } from "tldts";
 import { safeResolveHost, blockIfPrivate } from "../utils/network";
 import whois from "whois-json";
+import redis from "../utils/redis";
+import { Checker, CheckResult } from "../types";
+
+const WHOIS_CACHE_PREFIX = "whois_cache:";
+const WHOIS_CACHE_TTL = 86400 * 7; // 1 week
 
 async function whoisCheck(regDomain: string, hostname: string) {
   const reasons: string[] = [];
   const details: Record<string, any> = {};
   let scoreDelta = 0;
 
+  const cacheKey = `${WHOIS_CACHE_PREFIX}${regDomain || hostname}`;
+
   try {
-    const whoisRaw = await whois(regDomain || hostname);
-    const whoisInfo: any = Array.isArray(whoisRaw)
-      ? whoisRaw[0] || {}
-      : whoisRaw || {};
+    // Try cache first
+    const cached = await redis.get(cacheKey);
+    let whoisInfo: any;
+
+    if (cached) {
+      whoisInfo = JSON.parse(cached as string);
+    } else {
+      const whoisRaw = (await whois(regDomain || hostname)) as any;
+      whoisInfo = Array.isArray(whoisRaw)
+        ? whoisRaw[0] || {}
+        : whoisRaw || {};
+
+      // Cache the result
+      await (redis as any).set(cacheKey, JSON.stringify(whoisInfo) as any);
+      await (redis as any).expire(cacheKey, WHOIS_CACHE_TTL);
+    }
+
     details.whois = {
       registrar: whoisInfo.registrar || whoisInfo["Registrar"],
       creationDate:
@@ -47,14 +67,23 @@ async function whoisCheck(regDomain: string, hostname: string) {
   return { scoreDelta, reasons, details };
 }
 
-export async function heuristicCheck(url: string) {
+export async function heuristicCheck(url: string): Promise<CheckResult> {
   let score = 0;
   const reasons: string[] = [];
 
-  let parsed = new URL(url.startsWith("http") ? url : `http://${url}`);
+  let parsed: URL;
+  try {
+    parsed = new URL(url.startsWith("http") ? url : `http://${url}`);
+  } catch {
+    return { score: 0 };
+  }
 
   const hostname = parsed.hostname;
-  blockIfPrivate(hostname);
+  try {
+    blockIfPrivate(hostname);
+  } catch {
+    return { score: 50, reasons: ["Private/Internal network address"] };
+  }
 
   const domainInfo = parse(hostname);
   const domain = domainInfo.domain || hostname;
@@ -108,3 +137,9 @@ export async function heuristicCheck(url: string) {
 
   return { score, reasons };
 }
+
+export const HeuristicsChecker: Checker = {
+  name: "heuristics",
+  check: heuristicCheck,
+};
+
