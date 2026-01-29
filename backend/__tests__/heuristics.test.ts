@@ -33,9 +33,9 @@ import { HeuristicsChecker } from "../src/checkers/heuristics";
 jest.mock("../src/utils/redis", () => ({
   __esModule: true,
   default: {
-    get: jest.fn(),
-    set: jest.fn(),
-    expire: jest.fn(),
+    hget: jest.fn(),
+    hset: jest.fn(),
+    zadd: jest.fn(),
   },
 }));
 
