@@ -29,7 +29,30 @@ class CacheManager {
                 console.error(`CacheManager: Task ${name} failed:`, err);
             }
         }
+        await this.cleanupWhois();
         console.log("CacheManager: Background refreshes complete.");
+    }
+
+    async cleanupWhois() {
+        const KEY_WHOIS_DATA = "whois_data";
+        const KEY_WHOIS_EXPIRY = "whois_expiry";
+
+        try {
+            const now = Date.now();
+            // Get expired domains (score <= now)
+            const expired = await redis.zrange(KEY_WHOIS_EXPIRY, 0, now, { byScore: true });
+
+            if (expired.length > 0) {
+                console.log(`CacheManager: Cleaning up ${expired.length} expired WHOIS entries...`);
+                // Remove from Hash
+                await redis.hdel(KEY_WHOIS_DATA, ...expired as string[]);
+                // Remove from ZSET
+                await redis.zrem(KEY_WHOIS_EXPIRY, ...expired);
+                console.log("CacheManager: WHOIS cleanup complete.");
+            }
+        } catch (err) {
+            console.error("CacheManager: WHOIS cleanup failed:", err);
+        }
     }
 
     stop() {
