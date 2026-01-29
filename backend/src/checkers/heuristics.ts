@@ -5,32 +5,34 @@ import whois from "whois-json";
 import redis from "../utils/redis";
 import { Checker, CheckResult } from "../types";
 
-const WHOIS_CACHE_PREFIX = "whois_cache:";
-const WHOIS_CACHE_TTL = 86400; // 24 hours
+const WHOIS_CACHE_TTL = 86400 * 1000; // 24 hours in ms
+const KEY_WHOIS_DATA = "whois_data";
+const KEY_WHOIS_EXPIRY = "whois_expiry";
 
 async function whoisCheck(regDomain: string, hostname: string) {
   const reasons: string[] = [];
   const details: Record<string, any> = {};
   let scoreDelta = 0;
 
-  const cacheKey = `${WHOIS_CACHE_PREFIX}${regDomain || hostname}`;
+  const lookupKey = regDomain || hostname;
 
   try {
-    // Try cache first
-    const cached = await redis.get(cacheKey);
+    // Try cache first (Hash)
+    const cached = await redis.hget(KEY_WHOIS_DATA, lookupKey);
     let whoisInfo: any;
 
     if (cached) {
       whoisInfo = JSON.parse(cached as string);
     } else {
-      const whoisRaw = (await whois(regDomain || hostname)) as any;
+      const whoisRaw = (await whois(lookupKey)) as any;
       whoisInfo = Array.isArray(whoisRaw)
         ? whoisRaw[0] || {}
         : whoisRaw || {};
 
-      // Cache the result
-      await (redis as any).set(cacheKey, JSON.stringify(whoisInfo) as any);
-      await (redis as any).expire(cacheKey, WHOIS_CACHE_TTL);
+      // Cache the result (Hash + ZSET)
+      const now = Date.now();
+      await redis.hset(KEY_WHOIS_DATA, { [lookupKey]: JSON.stringify(whoisInfo) });
+      await redis.zadd(KEY_WHOIS_EXPIRY, { score: now + WHOIS_CACHE_TTL, member: lookupKey });
     }
 
     details.whois = {

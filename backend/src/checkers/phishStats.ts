@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import redis from "../utils/redis";
 import { Checker, CheckResult } from "../types";
 
-const FEED = "https://api.phishstats.info/api/phishing?_sort=-id&_size=1000"; // Fetch last 1000 entries
+const FEED = "https://api.phishstats.info/api/phishing?_sort=-id&_size=20000"; // Fetch last 20k entries
 const REDIS_KEY_URLS = "phishstats_urls";
 const REDIS_KEY_HOSTS = "phishstats_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishstats_last_update";

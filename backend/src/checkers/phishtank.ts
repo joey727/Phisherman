@@ -2,225 +2,147 @@ import axios from "axios";
 import dotenv from "dotenv";
 import { URL } from "node:url";
 import redis from "../utils/redis";
-import pako from "pako";
+import readline from "node:readline";
+import zlib from "node:zlib";
+import { Checker, CheckResult } from "../types";
 
 dotenv.config();
 
+const FEED = "http://data.phishtank.com/data/online-valid.csv.gz";
 const REDIS_KEY_URLS = "phishtank_urls";
-// const REDIS_KEY_HOSTS = "phishtank_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishtank_last_update";
 const REDIS_KEY_LAST_FAIL = "phishtank_last_fail";
-const FAIL_COOLDOWN_MS = 15 * 60 * 1000; // back off for 15 minutes after a failed fetch
-const MAX_FEED_BYTES = 20 * 1024 * 1024; // 20MB max for 512MB server (leaves room for decompression + processing)
-const PROCESSING_BATCH_SIZE = 500; // Process URLs in smaller batches to reduce memory spikes
-
-const DEFAULT_PHISHTANK_URLS = [
-  "https://data.phishtank.com/data/online-valid.json.gz",
-  "https://data.phishtank.com/data/online-valid.json",
-];
+const FAIL_COOLDOWN_MS = 15 * 60 * 1000; // 15 mins
 
 export async function loadPhishTank() {
   try {
     const lastUpdate = await redis.get(REDIS_KEY_LAST_UPDATE);
+    // Refresh every hour
     const cacheExpired = !lastUpdate || (Date.now() - Number(lastUpdate) > 3600 * 1000);
 
     if (cacheExpired) {
       const lastFail = await redis.get(REDIS_KEY_LAST_FAIL);
-      const failedRecently = lastFail && (Date.now() - Number(lastFail) < FAIL_COOLDOWN_MS);
-      if (failedRecently) {
-        console.log("Skipping PhishTank refresh due to recent failure cooldown.");
+      if (lastFail && (Date.now() - Number(lastFail) < FAIL_COOLDOWN_MS)) {
+        console.log("Skipping PhishTank refresh due to cooldown.");
         return;
       }
 
-      console.log("PhishTank cache expired or missing. Refreshing Redis...");
-      const normalizeCandidate = (url: string) => {
-        // Only append format=json if it's not already present and the URL is not a gzipped dump.
-        if (!url.includes("format=json") && !url.endsWith(".gz")) {
-          const separator = url.includes("?") ? "&" : "?";
-          return `${url}${separator}format=json`;
-        }
-        return url;
-      };
+      console.log("PhishTank cache expired. Starting stream refresh...");
 
-      const candidates = [
-        process.env.PHISHTANK_API_URL
-          ? normalizeCandidate(process.env.PHISHTANK_API_URL)
-          : undefined,
-        ...DEFAULT_PHISHTANK_URLS,
-      ].filter(Boolean) as string[];
+      const candidate = process.env.PHISHTANK_API_URL || FEED;
 
       try {
-        let succeeded = false;
-        let totalUrlsProcessed = 0;
+        const response = await axios.get(candidate, {
+          timeout: 60000,
+          headers: { "User-Agent": "phishtank/PhishermanScanner" },
+          responseType: "stream",
+          validateStatus: () => true,
+        });
 
-        for (const candidate of candidates) {
-          console.log(`Fetching PhishTank from: ${candidate}`);
-          try {
-            const response = await axios.get(candidate, {
-              timeout: 30000,
-              headers: { "User-Agent": "phishtank/PhishermanScanner" },
-              responseType: "arraybuffer",
-              maxContentLength: MAX_FEED_BYTES,
-              maxBodyLength: MAX_FEED_BYTES,
-              decompress: true,
-              validateStatus: () => true, // Accept all status codes, we'll check manually
-            });
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-            const status = response?.status;
-            if (typeof status !== "number") {
-              throw new Error("PhishTank response missing status code");
-            }
+        let stream = response.data;
 
-            // Check for error status codes
-            if (status < 200 || status >= 300) {
-              console.error(`PhishTank endpoint returned status ${status} for ${candidate}`);
-              continue; // Try next candidate
-            }
+        // Handle GZIP if needed (extension check or header check)
+        // Note: PhishTank .gz feed usually sends application/x-gzip or similar
+        // We will force gunzip if the URL ends in .gz
+        if (candidate.endsWith(".gz")) {
+          const gunzip = zlib.createGunzip();
+          stream.pipe(gunzip);
+          stream = gunzip;
+        }
 
-            console.log(`PhishTank API status: ${status}`);
+        const rl = readline.createInterface({
+          input: stream,
+          crlfDelay: Infinity,
+        });
 
-            const headers = (response as any)?.headers || {};
-            const contentType = headers["content-type"] || headers["Content-Type"];
-            if (contentType && contentType.startsWith("image/")) {
-              console.error(`PhishTank endpoint returned image content-type (${contentType}) for ${candidate}`);
-              continue; // Try next candidate
-            }
+        const tempUrlsKey = `${REDIS_KEY_URLS}_temp`;
+        await redis.del(tempUrlsKey);
 
-            const buffer = Buffer.from(response.data ?? []);
+        const batchSize = 1000;
+        const urlBatch: string[] = [];
+        let totalProcessed = 0;
 
-            if (buffer.length > MAX_FEED_BYTES) {
-              console.error(
-                `PhishTank feed too large (${buffer.length} bytes > ${MAX_FEED_BYTES}); aborting parse.`
-              );
-              continue; // Try next candidate
-            }
+        for await (const line of rl) {
+          if (!line || line.startsWith("phish_id")) continue; // Skip header
 
-            if (buffer.length === 0) {
-              console.error(`PhishTank endpoint returned empty response for ${candidate}`);
-              continue; // Try next candidate
-            }
+          // CSV: phish_id,url,phish_detail_url,submission_time,verified,verification_time,online,target
+          // We want index 1 (url)
 
-            // Decompress if needed
-            let rawString: string;
-            if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
-              rawString = pako.inflate(new Uint8Array(buffer), { to: "string" });
-            } else {
-              rawString = buffer.toString();
-            }
-            // Buffer will be GC'd when it goes out of scope
+          const parts = line.split(',');
+          // PhishTank CSVs are usually standard, but URLs can have commas. 
+          // If the URL has commas, it might be quoted.
+          // A robust parser is expensive. For now, we take the 2nd element. 
+          // If it starts with quote, we might need to look further.
+          // For speed/memory on 512MB, we try a simple heuristic:
 
-            // Parse JSON
-            let data: any;
-            try {
-              data = JSON.parse(rawString);
-              console.log(`PhishTank parsed successfully. Total entries: ${Array.isArray(data) ? data.length : 0}`);
-            } catch (parseError) {
-              console.error("Failed to parse PhishTank response as JSON.");
-              console.error(`First 200 chars of response: ${rawString.substring(0, 200)}`);
-              // Clear rawString before continuing
-              rawString = "";
-              continue;
-            }
+          let rawUrl = parts[1];
+          // Basic cleanup if quoted
+          if (rawUrl && rawUrl.startsWith('"') && rawUrl.endsWith('"')) {
+            rawUrl = rawUrl.slice(1, -1);
+          }
 
-            // Clear rawString immediately after parsing to free memory
-            rawString = "";
+          if (rawUrl) {
+            const normalized = normalize(rawUrl);
+            urlBatch.push(normalized);
+            totalProcessed++;
+          }
 
-            if (!Array.isArray(data) || data.length === 0) {
-              console.warn("PhishTank response contained no entries.");
-              data = null;
-              continue;
-            }
-
-            // Log sample entry
-            if (data[0]) {
-              console.log("PhishTank Sample Entry:", JSON.stringify(data[0], null, 2));
-            }
-
-            // Process entries in batches and write directly to Redis (memory-efficient)
-            await redis.del(REDIS_KEY_URLS);
-
-            const urlBatch: string[] = [];
-            let processedCount = 0;
-
-            for (const entry of data) {
-              if (entry?.url) {
-                urlBatch.push(entry.url);
-                processedCount++;
-
-                // Write to Redis in batches to avoid memory buildup
-                if (urlBatch.length >= PROCESSING_BATCH_SIZE) {
-                  await (redis as any).sadd(REDIS_KEY_URLS, ...urlBatch);
-                  totalUrlsProcessed += urlBatch.length;
-                  urlBatch.length = 0; // Clear array efficiently
-
-                  // Force garbage collection hint by yielding
-                  if (processedCount % (PROCESSING_BATCH_SIZE * 10) === 0) {
-                    await new Promise(resolve => setImmediate(resolve));
-                  }
-                }
-              }
-            }
-
-            // Write remaining URLs
-            if (urlBatch.length > 0) {
-              await (redis as any).sadd(REDIS_KEY_URLS, ...urlBatch);
-              totalUrlsProcessed += urlBatch.length;
-            }
-
-            // Clear data immediately after processing
-            data = null;
-
-            if (totalUrlsProcessed > 0) {
-              await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-              console.log(`PhishTank Redis cache populated: ${totalUrlsProcessed} URLs.`);
-              succeeded = true;
-              break;
-            } else {
-              console.warn("PhishTank response contained no URL entries; leaving cache unchanged.");
-            }
-          } catch (candidateErr: any) {
-            // Handle axios errors specifically
-            if (candidateErr?.response) {
-              const status = candidateErr.response.status;
-              const contentType = candidateErr.response.headers?.["content-type"] || candidateErr.response.headers?.["Content-Type"];
-              console.error(`PhishTank fetch failed for ${candidate}: HTTP ${status}${contentType ? ` (${contentType})` : ""}`);
-            } else if (candidateErr?.code === "ERR_BAD_REQUEST" || candidateErr?.code === "ECONNREFUSED" || candidateErr?.code === "ETIMEDOUT") {
-              console.error(`PhishTank fetch failed for ${candidate}: ${candidateErr.code}`);
-            } else {
-              console.error(`PhishTank fetch failed for ${candidate}:`, candidateErr?.message || candidateErr);
-            }
-            // Continue to next candidate
+          if (urlBatch.length >= batchSize) {
+            await (redis as any).sadd(tempUrlsKey, ...urlBatch);
+            urlBatch.length = 0;
+            // Yield
+            await new Promise(resolve => setImmediate(resolve));
           }
         }
 
-        if (!succeeded) {
-          await redis.set(REDIS_KEY_LAST_FAIL, Date.now().toString());
-          throw new Error("All PhishTank endpoints failed; backing off.");
-        } else {
-          await redis.del(REDIS_KEY_LAST_FAIL);
+        if (urlBatch.length > 0) {
+          await (redis as any).sadd(tempUrlsKey, ...urlBatch);
         }
-      } catch (err) {
-        console.error("PhishTank refresh error:", err);
+
+        if (totalProcessed > 0) {
+          await redis.rename(tempUrlsKey, REDIS_KEY_URLS);
+          await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
+          await redis.del(REDIS_KEY_LAST_FAIL);
+          console.log(`PhishTank Redis cache populated with ${totalProcessed} entries (Streamed).`);
+        } else {
+          await redis.del(tempUrlsKey);
+          console.warn("PhishTank stream processed 0 entries.");
+        }
+
+      } catch (err: any) {
+        console.error("PhishTank fetch failed:", err.message);
+        await redis.set(REDIS_KEY_LAST_FAIL, Date.now().toString());
       }
     }
   } catch (err) {
-    console.error("PhishTank refresh error:", err);
+    console.error("PhishTank outer error:", err);
   }
 }
 
 function normalize(u: string): string {
   try {
-    return new URL(u).hostname.replace("www.", "").toLowerCase();
+    // PhishTank URLs are often full paths. We store full URL for exact match.
+    // If we wanted to store hostnames only, we would do:
+    // return new URL(u).hostname.replace("www.", "").toLowerCase();
+    // But checkPhishTank checks full URL existence first. 
+    // Wait, previous implementation stored full URLs in REDIS_KEY_URLS. 
+    // So we keep it as is, but maybe trim.
+    return u.trim();
   } catch {
-    return u.toLowerCase();
+    return u.trim();
   }
 }
 
-import { Checker, CheckResult } from "../types";
 
 export async function checkPhishTank(url: string): Promise<CheckResult> {
   try {
     // Exact URL Match
+    // Note: PhishTank URLs in DB might be http vs https or have query params.
+    // Exact match is tricky. 
     const isUrlMember = await redis.sismember(REDIS_KEY_URLS, url);
     if (isUrlMember) {
       return {
@@ -228,7 +150,6 @@ export async function checkPhishTank(url: string): Promise<CheckResult> {
         reason: "Exact URL match in PhishTank database",
       };
     }
-
   } catch (err) {
     console.error("PhishTank check error:", err);
   }
