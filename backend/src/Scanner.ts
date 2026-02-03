@@ -14,7 +14,7 @@ registry.register(OpenPhishChecker);
 registry.register(SafeBrowsingChecker);
 registry.register(URLHausChecker);
 registry.register(PhishTankChecker);
-registry.register(WebRiskChecker);
+// registry.register(WebRiskChecker);
 registry.register(PhishStatsChecker);
 
 import redis from "./utils/redis";
@@ -27,7 +27,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
   try {
     const cached = await redis.get(cacheKey);
     if (cached) {
-      return JSON.parse(cached as string) as ScanResult;
+      return (typeof cached === "string" ? JSON.parse(cached) : cached) as ScanResult;
     }
   } catch (err) {
     console.error("Cache read error:", err);
