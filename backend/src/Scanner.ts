@@ -17,7 +17,22 @@ registry.register(PhishTankChecker);
 registry.register(WebRiskChecker);
 registry.register(PhishStatsChecker);
 
+import redis from "./utils/redis";
+
+const RESULT_CACHE_TTL = 300; // 5 minutes
+
 export async function analyzeUrl(url: string): Promise<ScanResult> {
+  const cacheKey = `scan_result:${url}`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached as string) as ScanResult;
+    }
+  } catch (err) {
+    console.error("Cache read error:", err);
+  }
+
   const { checks, timing } = await registry.runAll(url);
 
   const totalScore = Math.min(
@@ -39,12 +54,20 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
     }
   }
 
-  return {
+  const result: ScanResult = {
     url,
     score: totalScore,
     verdict,
     reasons: allReasons,
     executionTimeMs: timing,
   };
+
+  try {
+    await redis.setex(cacheKey, RESULT_CACHE_TTL, JSON.stringify(result));
+  } catch (err) {
+    console.error("Cache write error:", err);
+  }
+
+  return result;
 }
 
