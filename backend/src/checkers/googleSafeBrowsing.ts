@@ -4,7 +4,20 @@ import { Checker, CheckResult } from "../types";
 
 dotenv.config();
 
+import redis from "../utils/redis";
+
+const CACHE_KEY_PREFIX = "gsb_cache:";
+const CACHE_TTL = 3600; // 1 hour for valid results
+const ERROR_CACHE_TTL = 900; // 15 mins for errors (e.g. billing)
+
 export async function checkSafeBrowsing(url: string): Promise<CheckResult> {
+  const cacheKey = `${CACHE_KEY_PREFIX}${url}`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return (typeof cached === "string" ? JSON.parse(cached) : cached) as CheckResult;
+  } catch (err) { }
+
   try {
     const api_key = process.env.GOOGLE_SAFE_API_KEY;
 
@@ -26,16 +39,20 @@ export async function checkSafeBrowsing(url: string): Promise<CheckResult> {
       }
     );
 
+    let result: CheckResult = { score: 0 };
     if (Array.isArray(r.data?.matches) && r.data.matches.length > 0) {
-      return {
+      result = {
         score: 50,
         reason: "Google Safe Browsing flagged this URL as dangerous",
       };
     }
 
-    return { score: 0 };
+    await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+    return result;
   } catch (err: any) {
     console.error("safe browsing error: ", err.response?.data || err.message);
+    // Cache the error state for a shorter time to prevent retrying a broken service every scan
+    await redis.setex(cacheKey, ERROR_CACHE_TTL, JSON.stringify({ score: 0 }));
     return { score: 0 }
   }
 }
