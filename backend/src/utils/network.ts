@@ -30,7 +30,19 @@ function isPrivateIP(ip: string): boolean {
   return true;
 }
 
+import redis from "./redis";
+
+const DNS_CACHE_PREFIX = "dns_cache:";
+const DNS_CACHE_TTL = 3600; // 1 hour
+
 export async function safeResolveHost(host: string): Promise<string[]> {
+  const cacheKey = `${DNS_CACHE_PREFIX}${host}`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return (typeof cached === "string" ? JSON.parse(cached) : cached) as string[];
+  } catch (err) { }
+
   // If host is already an IP address
   if (isIP(host)) {
     if (isPrivateIP(host)) {
@@ -69,6 +81,10 @@ export async function safeResolveHost(host: string): Promise<string[]> {
       throw new Error(`Blocked via DNS rebinding check: ${ip}`);
     }
   }
+
+  try {
+    await redis.setex(cacheKey, DNS_CACHE_TTL, JSON.stringify(ips));
+  } catch (err) { }
 
   return ips;
 }
