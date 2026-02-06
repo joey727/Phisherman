@@ -1,4 +1,5 @@
 import redis from "./utils/redis";
+import { gsbCache, gwrCache, dnsCache } from "./utils/hashCache";
 
 type RefreshTask = () => Promise<void>;
 
@@ -29,8 +30,26 @@ class CacheManager {
                 console.error(`CacheManager: Task ${name} failed:`, err);
             }
         }
+        await this.cleanupScanResults();
         await this.cleanupWhois();
+        await this.cleanupHashCaches();
         console.log("CacheManager: Background refreshes complete.");
+    }
+
+    async cleanupScanResults() {
+        const KEY_SCAN_HASH = "scan_results";
+        const KEY_SCAN_EXPIRY = "scan_results_expiry";
+
+        try {
+            const now = Date.now();
+            const expired = await redis.zrange(KEY_SCAN_EXPIRY, 0, now, { byScore: true });
+            if (expired.length > 0) {
+                await redis.hdel(KEY_SCAN_HASH, ...(expired as string[]));
+                await redis.zrem(KEY_SCAN_EXPIRY, ...expired);
+            }
+        } catch (err) {
+            console.error("CacheManager: Scan-results cleanup failed:", err);
+        }
     }
 
     async cleanupWhois() {
@@ -52,6 +71,20 @@ class CacheManager {
             }
         } catch (err) {
             console.error("CacheManager: WHOIS cleanup failed:", err);
+        }
+    }
+
+    async cleanupHashCaches() {
+        try {
+            const gsbCleaned = await gsbCache.cleanup();
+            const gwrCleaned = await gwrCache.cleanup();
+            const dnsCleaned = await dnsCache.cleanup();
+            const total = gsbCleaned + gwrCleaned + dnsCleaned;
+            if (total > 0) {
+                console.log(`CacheManager: Cleaned up ${total} expired hash cache entries (GSB:${gsbCleaned}, GWR:${gwrCleaned}, DNS:${dnsCleaned})`);
+            }
+        } catch (err) {
+            console.error("CacheManager: Hash cache cleanup failed:", err);
         }
     }
 

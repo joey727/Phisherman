@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import { isIP } from "node:net";
+import { dnsCache } from "./hashCache";
 
 // Private and local IP ranges that must be blocked
 const PRIVATE_IP_RANGES = [
@@ -30,17 +31,12 @@ function isPrivateIP(ip: string): boolean {
   return true;
 }
 
-import redis from "./redis";
-
-const DNS_CACHE_PREFIX = "dns_cache:";
 const DNS_CACHE_TTL = 3600; // 1 hour
 
 export async function safeResolveHost(host: string): Promise<string[]> {
-  const cacheKey = `${DNS_CACHE_PREFIX}${host}`;
-
   try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return (typeof cached === "string" ? JSON.parse(cached) : cached) as string[];
+    const cached = await dnsCache.get<string[]>(host);
+    if (cached) return cached;
   } catch (err) { }
 
   // If host is already an IP address
@@ -83,7 +79,7 @@ export async function safeResolveHost(host: string): Promise<string[]> {
   }
 
   try {
-    await redis.setex(cacheKey, DNS_CACHE_TTL, JSON.stringify(ips));
+    await dnsCache.set(host, ips, DNS_CACHE_TTL);
   } catch (err) { }
 
   return ips;
