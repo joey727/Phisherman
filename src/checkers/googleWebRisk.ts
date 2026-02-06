@@ -1,23 +1,19 @@
 import axios from "axios";
 import dotenv from "dotenv";
 import { Checker, CheckResult } from "../types";
+import { gwrCache } from "../utils/hashCache";
 
 dotenv.config();
 
 const WEBRISK_ENDPOINT = "https://webrisk.googleapis.com/v1/uris:search";
 
-import redis from "../utils/redis";
-
-const CACHE_KEY_PREFIX = "gwr_cache:";
 const CACHE_TTL = 3600; // 1 hour
 const ERROR_CACHE_TTL = 900; // 15 mins
 
 export async function checkGoogleWebRisk(url: string): Promise<CheckResult> {
-  const cacheKey = `${CACHE_KEY_PREFIX}${url}`;
-
   try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return (typeof cached === "string" ? JSON.parse(cached) : cached) as CheckResult;
+    const cached = await gwrCache.get<CheckResult>(url);
+    if (cached) return cached;
   } catch (err) { }
 
   const apiKey = process.env.WEBRISK_API_KEY;
@@ -48,11 +44,11 @@ export async function checkGoogleWebRisk(url: string): Promise<CheckResult> {
       };
     }
 
-    await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+    await gwrCache.set(url, result, CACHE_TTL);
     return result;
   } catch (err: any) {
     console.error("WebRisk error:", err.response?.data || err.message);
-    await redis.setex(cacheKey, ERROR_CACHE_TTL, JSON.stringify({ score: 0 }));
+    await gwrCache.set(url, { score: 0 }, ERROR_CACHE_TTL);
     return { score: 0 }; // fail open (non-blocking)
   }
 }
@@ -61,4 +57,3 @@ export const WebRiskChecker: Checker = {
   name: "google_web_risk",
   check: checkGoogleWebRisk,
 };
-
