@@ -1,6 +1,6 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import { Checker, CheckResult } from "../types";
+import { Checker, CheckResult, ParsedUrl } from "../types";
 import { gsbCache } from "../utils/hashCache";
 
 dotenv.config();
@@ -8,7 +8,7 @@ dotenv.config();
 const CACHE_TTL = 3600; // 1 hour for valid results
 const ERROR_CACHE_TTL = 900; // 15 mins for errors (e.g. billing)
 
-export async function checkSafeBrowsing(url: string): Promise<CheckResult> {
+export async function checkSafeBrowsing(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
   try {
     const cached = await gsbCache.get<CheckResult>(url);
     if (cached) return cached;

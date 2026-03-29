@@ -1,7 +1,7 @@
 import axios from "axios";
 import { URL } from "node:url";
 import redis from "../utils/redis";
-import { Checker, CheckResult } from "../types";
+import { Checker, CheckResult, ParsedUrl } from "../types";
 
 const FEED = "https://api.phishstats.info/api/phishing?_sort=-id&_size=20000"; // Fetch last 20k entries
 const REDIS_KEY_URLS = "phishstats_urls";
@@ -52,10 +52,13 @@ export async function loadPhishStats() {
                 if (urlBatch.length >= 1000) {
                     await (redis.sadd as any)(tempUrlsKey, ...urlBatch);
                     urlBatch.length = 0;
+                    // Yield to event loop to keep server responsive
+                    await new Promise(resolve => setImmediate(resolve));
                 }
                 if (hostBatch.length >= 1000) {
                     await (redis.sadd as any)(tempHostsKey, ...hostBatch);
                     hostBatch.length = 0;
+                    await new Promise(resolve => setImmediate(resolve));
                 }
             }
 
@@ -77,17 +80,24 @@ export async function loadPhishStats() {
     }
 }
 
-export async function checkPhishStats(url: string): Promise<CheckResult> {
+export async function checkPhishStats(url: string, parsed?: ParsedUrl): Promise<CheckResult> {
     try {
         const urlMatch = await redis.sismember(REDIS_KEY_URLS, url);
         if (urlMatch) return { score: 100, reason: "Listed in PhishStats database" };
 
-        try {
-            const u = new URL(url.startsWith("http") ? url : `http://${url}`);
-            const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, u.hostname);
+        // Use pre-parsed hostname if available
+        const hostname = parsed?.hostname;
+        if (hostname) {
+            const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, hostname);
             if (hostMatch) return { score: 80, reason: "Domain listed in PhishStats intelligence" };
-        } catch {
-            // ignore
+        } else {
+            try {
+                const u = new URL(url.startsWith("http") ? url : `http://${url}`);
+                const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, u.hostname);
+                if (hostMatch) return { score: 80, reason: "Domain listed in PhishStats intelligence" };
+            } catch {
+                // ignore
+            }
         }
     } catch (err) {
         console.error("PhishStats check error:", err);

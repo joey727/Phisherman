@@ -3,7 +3,7 @@ import { parse } from "tldts";
 import { safeResolveHost, blockIfPrivate } from "../utils/network";
 import whois from "whois-json";
 import redis from "../utils/redis";
-import { Checker, CheckResult } from "../types";
+import { Checker, CheckResult, ParsedUrl } from "../types";
 
 const WHOIS_CACHE_TTL = 86400 * 1000; // 24 hours in ms
 const KEY_WHOIS_DATA = "whois_data";
@@ -24,15 +24,28 @@ async function whoisCheck(regDomain: string, hostname: string) {
     if (cached) {
       whoisInfo = JSON.parse(cached as string);
     } else {
-      const whoisRaw = (await whois(lookupKey)) as any;
-      whoisInfo = Array.isArray(whoisRaw)
-        ? whoisRaw[0] || {}
-        : whoisRaw || {};
+      // Wrap whois in a timeout -- the library uses raw TCP sockets with no built-in timeout
+      const WHOIS_TIMEOUT_MS = 2000;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const whoisRaw = await Promise.race([
+          whois(lookupKey),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("WHOIS lookup timed out")), WHOIS_TIMEOUT_MS);
+          }),
+        ]) as any;
 
-      // Cache the result (Hash + ZSET)
-      const now = Date.now();
-      await redis.hset(KEY_WHOIS_DATA, { [lookupKey]: JSON.stringify(whoisInfo) });
-      await redis.zadd(KEY_WHOIS_EXPIRY, { score: now + WHOIS_CACHE_TTL, member: lookupKey });
+        whoisInfo = Array.isArray(whoisRaw)
+          ? whoisRaw[0] || {}
+          : whoisRaw || {};
+
+        // Cache the result (Hash + ZSET)
+        const now = Date.now();
+        await redis.hset(KEY_WHOIS_DATA, { [lookupKey]: JSON.stringify(whoisInfo) });
+        await redis.zadd(KEY_WHOIS_EXPIRY, { score: now + WHOIS_CACHE_TTL, member: lookupKey });
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
 
     details.whois = {
@@ -69,18 +82,26 @@ async function whoisCheck(regDomain: string, hostname: string) {
   return { scoreDelta, reasons, details };
 }
 
-export async function heuristicCheck(url: string): Promise<CheckResult> {
+export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<CheckResult> {
   let score = 0;
   const reasons: string[] = [];
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url.startsWith("http") ? url : `http://${url}`);
-  } catch {
-    return { score: 0 };
+  // Use pre-parsed URL if available, otherwise parse locally
+  let hostname: string;
+  let protocol: string;
+  if (parsed) {
+    hostname = parsed.hostname;
+    protocol = parsed.protocol;
+  } else {
+    try {
+      const u = new URL(url.startsWith("http") ? url : `http://${url}`);
+      hostname = u.hostname;
+      protocol = u.protocol;
+    } catch {
+      return { score: 0 };
+    }
   }
 
-  const hostname = parsed.hostname;
   try {
     blockIfPrivate(hostname);
   } catch {
@@ -117,7 +138,7 @@ export async function heuristicCheck(url: string): Promise<CheckResult> {
   }
 
   // HTTPS check
-  if (parsed.protocol !== "https:") {
+  if (protocol !== "https:") {
     score += 10;
     reasons.push("URL is not HTTPS");
   }
