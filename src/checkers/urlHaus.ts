@@ -4,7 +4,7 @@ import redis from "../utils/redis";
 import readline from "node:readline";
 import { Checker, CheckResult, ParsedUrl } from "../types";
 
-const FEED = "https://urlhaus.abuse.ch/downloads/csv-online/";
+const FEED = "https://urlhaus.abuse.ch/downloads/csv_online/"; // use direct CSV export link
 const REDIS_KEY_BLACKLIST = "urlhaus_blacklist";
 const REDIS_KEY_LAST_UPDATE = "urlhaus_last_update";
 
@@ -22,15 +22,20 @@ export async function loadURLHaus() {
 
       const response = await axios.get(FEED, {
         timeout: 60000,
-        headers: { "User-Agent": "PhishermanScanner/1.0" },
-        responseType: "stream",
+        headers: { "User-Agent": "Mozilla/5.0" },
       });
 
-      stream = response.data;
-      rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity,
-      });
+      if (response.status !== 200) {
+        console.error(`URLHaus fetch returned status ${response.status}`);
+        return;
+      }
+
+      const data = response.data;
+      console.log(`URLHaus: Data received, length: ${data.length}`);
+      console.log(`URLHaus: First 100 chars: ${data.substring(0, 100)}`);
+      
+      const lines = data.split("\n");
+      console.log(`URLHaus: Total lines: ${lines.length}`);
 
       // Use a temporary key to ensure atomicity
       await redis.del(tempKey);
@@ -39,7 +44,8 @@ export async function loadURLHaus() {
       const urlBatch: string[] = [];
       let totalProcessed = 0;
 
-      for await (const line of rl) {
+      for (const line of lines) {
+        if (totalProcessed === 0) console.log(`URLHaus: First line received: ${line.substring(0, 50)}`);
         // Skip comments and empty lines
         if (!line || line.startsWith("#")) continue;
 
