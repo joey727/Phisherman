@@ -4,7 +4,7 @@ import { URL } from "node:url";
 import redis from "../utils/redis";
 import readline from "node:readline";
 import zlib from "node:zlib";
-import { Checker, CheckResult } from "../types";
+import { Checker, CheckResult, ParsedUrl } from "../types";
 
 dotenv.config();
 
@@ -59,6 +59,8 @@ export async function loadPhishTank() {
 
 async function attemptFetchAndPopulate(url: string): Promise<boolean> {
   const tempUrlsKey = `${REDIS_KEY_URLS}_temp`;
+  let stream: any = null;
+  let rl: any = null;
   try {
     console.log(`PhishTank: Attempting to fetch from ${url}...`);
 
@@ -81,16 +83,18 @@ async function attemptFetchAndPopulate(url: string): Promise<boolean> {
 
     if (status !== 200) {
       console.error(`PhishTank fetch returned status ${status} for ${url}`);
+      response.data?.destroy?.();
       return false;
     }
 
     const contentType = response.headers?.["content-type"];
     if (contentType && contentType.startsWith("image/")) {
       console.error(`PhishTank fetch returned unexpected content-type ${contentType} for ${url}`);
+      response.data?.destroy?.();
       return false;
     }
 
-    let stream = response.data;
+    stream = response.data;
     // Check if response is gzipped by URL pattern OR content-type header
     const isGzipped = url.includes(".gz") ||
       contentType?.includes("gzip") ||
@@ -110,7 +114,7 @@ async function attemptFetchAndPopulate(url: string): Promise<boolean> {
       });
     }
 
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     const isJson = url.includes(".json") || response.headers?.["content-type"]?.includes("json");
 
     await redis.del(tempUrlsKey);
@@ -120,6 +124,9 @@ async function attemptFetchAndPopulate(url: string): Promise<boolean> {
       // JSON dumps are often huge arrays and require buffering. On small instances this can OOM.
       // We intentionally fail fast here so the caller can fall back to the streaming CSV dump.
       console.warn(`PhishTank endpoint looks like JSON (${url}); skipping to avoid large in-memory buffering.`);
+      rl.close();
+      stream.destroy?.();
+      response.data?.destroy?.();
       return false;
     }
 
@@ -133,31 +140,13 @@ async function attemptFetchAndPopulate(url: string): Promise<boolean> {
   } catch (err: any) {
     console.error(`Fetch failed for ${url}:`, err.message);
   } finally {
+    // Ensure stream resources are cleaned up
+    rl?.close?.();
+    stream?.destroy?.();
     await redis.del(tempUrlsKey);
   }
   return false;
 }
-
-async function populateFromJson(data: any, key: string): Promise<number> {
-  if (!Array.isArray(data)) return 0;
-  const batchSize = SADD_BATCH_SIZE;
-  let batch: string[] = [];
-  let count = 0;
-
-  for (const entry of data) {
-    if (entry.url) {
-      batch.push(normalize(entry.url));
-      count++;
-    }
-    if (batch.length >= batchSize) {
-      await (redis as any).sadd(key, ...batch);
-      batch = [];
-    }
-  }
-  if (batch.length > 0) await (redis as any).sadd(key, ...batch);
-  return count;
-}
-
 async function populateFromCsvStream(rl: any, key: string): Promise<number> {
   const batchSize = SADD_BATCH_SIZE;
   let batch: string[] = [];
@@ -179,27 +168,6 @@ async function populateFromCsvStream(rl: any, key: string): Promise<number> {
   return count;
 }
 
-async function populateFromCsvString(data: string, key: string): Promise<number> {
-  const lines = data.split(/\r?\n/);
-  const batchSize = SADD_BATCH_SIZE;
-  let batch: string[] = [];
-  let count = 0;
-
-  for (const line of lines) {
-    const url = parseUrlFromCsvLine(line);
-    if (url) {
-      batch.push(normalize(url));
-      count++;
-    }
-    if (batch.length >= batchSize) {
-      await (redis as any).sadd(key, ...batch);
-      batch = [];
-    }
-  }
-  if (batch.length > 0) await (redis as any).sadd(key, ...batch);
-  return count;
-}
-
 function parseUrlFromCsvLine(line: string): string | undefined {
   if (!line || line.startsWith("phish_id")) return undefined;
   const parts = line.split('","');
@@ -211,12 +179,6 @@ function parseUrlFromCsvLine(line: string): string | undefined {
 
 function normalize(u: string): string {
   try {
-    // PhishTank URLs are often full paths. We store full URL for exact match.
-    // If we wanted to store hostnames only, we would do:
-    // return new URL(u).hostname.replace("www.", "").toLowerCase();
-    // But checkPhishTank checks full URL existence first. 
-    // Wait, previous implementation stored full URLs in REDIS_KEY_URLS. 
-    // So we keep it as is, but maybe trim.
     return u.trim();
   } catch {
     return u.trim();
@@ -224,7 +186,8 @@ function normalize(u: string): string {
 }
 
 
-export async function checkPhishTank(url: string): Promise<CheckResult> {
+
+export async function checkPhishTank(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
   try {
     // exact url match is tricky as phishtank urls can have query params
     // and we store the full url in the database

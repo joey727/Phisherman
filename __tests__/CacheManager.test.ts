@@ -1,11 +1,30 @@
 import { cacheManager } from "../src/CacheManager";
+import redis from "../src/utils/redis";
+
+jest.mock("../src/utils/redis", () => ({
+    zrange: jest.fn().mockResolvedValue([]),
+    hdel: jest.fn().mockResolvedValue(1),
+    zrem: jest.fn().mockResolvedValue(1),
+    pipeline: jest.fn(() => ({
+        hdel: jest.fn().mockReturnThis(),
+        zrem: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([1, 1]),
+    })),
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+}));
+
+// Helper to flush all microtasks (promises)
+const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 describe("CacheManager", () => {
     beforeEach(() => {
-        // Stop and clear tasks before each test
         cacheManager.stop();
         (cacheManager as any).tasks.clear();
+        (cacheManager as any).isRunning = false;
         jest.useFakeTimers();
+        jest.clearAllMocks();
     });
 
     afterEach(() => {
@@ -38,12 +57,20 @@ describe("CacheManager", () => {
 
         // Start with short interval
         await cacheManager.start(1000);
+        await flush();
         expect(mockTask).toHaveBeenCalledTimes(1); // Immediate run
 
-        jest.advanceTimersByTime(1001);
+        // Advance timer and wait for async runAll() to finish and schedule next
+        jest.advanceTimersByTime(1100);
+        await flush();
         expect(mockTask).toHaveBeenCalledTimes(2);
 
-        jest.advanceTimersByTime(1001);
+        jest.advanceTimersByTime(1100);
+        await flush();
         expect(mockTask).toHaveBeenCalledTimes(3);
     });
 });
+
+
+
+

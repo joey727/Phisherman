@@ -1,3 +1,4 @@
+import { URL } from "node:url";
 import { registry } from "./CheckerRegistry";
 import { HeuristicsChecker } from "./checkers/heuristics";
 import { OpenPhishChecker } from "./checkers/openPhish";
@@ -6,7 +7,7 @@ import { URLHausChecker } from "./checkers/urlHaus";
 import { PhishTankChecker } from "./checkers/phishtank";
 import { WebRiskChecker } from "./checkers/googleWebRisk";
 import { PhishStatsChecker } from "./checkers/phishStats";
-import { ScanResult } from "./types";
+import { ScanResult, ParsedUrl } from "./types";
 
 // Register all checkers
 registry.register(HeuristicsChecker);
@@ -29,6 +30,20 @@ function scanCacheId(url: string) {
   return crypto.createHash("sha256").update(url).digest("hex");
 }
 
+function parseUrl(url: string): ParsedUrl | undefined {
+  try {
+    const u = new URL(url.startsWith("http") ? url : `http://${url}`);
+    return {
+      raw: url,
+      hostname: u.hostname,
+      protocol: u.protocol,
+      normalized: u.href,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function analyzeUrl(url: string): Promise<ScanResult> {
   const id = scanCacheId(url);
 
@@ -45,7 +60,10 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
     console.error("Cache read error:", err);
   }
 
-  const { checks, timing } = await registry.runAll(url);
+  // Parse URL once upfront and pass to all checkers
+  const parsedUrl = parseUrl(url);
+
+  const { checks, timing } = await registry.runAll(url, parsedUrl);
 
   const totalScore = Math.min(
     100,

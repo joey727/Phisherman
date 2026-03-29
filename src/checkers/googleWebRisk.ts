@@ -1,6 +1,6 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import { Checker, CheckResult } from "../types";
+import { Checker, CheckResult, ParsedUrl } from "../types";
 import { gwrCache } from "../utils/hashCache";
 
 dotenv.config();
@@ -10,7 +10,7 @@ const WEBRISK_ENDPOINT = "https://webrisk.googleapis.com/v1/uris:search";
 const CACHE_TTL = 3600; // 1 hour
 const ERROR_CACHE_TTL = 900; // 15 mins
 
-export async function checkGoogleWebRisk(url: string): Promise<CheckResult> {
+export async function checkGoogleWebRisk(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
   try {
     const cached = await gwrCache.get<CheckResult>(url);
     if (cached) return cached;

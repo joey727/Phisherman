@@ -8,6 +8,12 @@ jest.mock("../src/utils/redis", () => ({
     sadd: jest.fn(),
     exists: jest.fn(),
     sismember: jest.fn(),
+    rename: jest.fn(),
+    pipeline: jest.fn(() => ({
+        hdel: jest.fn().mockReturnThis(),
+        zrem: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([1, 1]),
+    })),
 }));
 
 describe("PhishTank Checker", () => {

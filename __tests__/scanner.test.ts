@@ -1,3 +1,21 @@
+jest.mock("../src/utils/redis", () => ({
+  get: jest.fn(),
+  set: jest.fn(),
+  hget: jest.fn().mockResolvedValue(null),
+  hset: jest.fn(),
+  zadd: jest.fn(),
+  del: jest.fn(),
+  sadd: jest.fn(),
+  rename: jest.fn(),
+  pipeline: jest.fn(() => ({
+    hset: jest.fn().mockReturnThis(),
+    zadd: jest.fn().mockReturnThis(),
+    hdel: jest.fn().mockReturnThis(),
+    zrem: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([1, 1]),
+  })),
+}));
+
 jest.mock("../src/checkers/heuristics", () => ({ HeuristicsChecker: { name: "heuristics", check: jest.fn() } }));
 jest.mock("../src/checkers/openPhish", () => ({ OpenPhishChecker: { name: "openphish", check: jest.fn() } }));
 jest.mock("../src/checkers/googleSafeBrowsing", () => ({ SafeBrowsingChecker: { name: "google_safe_browsing", check: jest.fn() } }));

@@ -5,35 +5,68 @@ type RefreshTask = () => Promise<void>;
 
 class CacheManager {
     private tasks: Map<string, RefreshTask> = new Map();
-    private interval: NodeJS.Timeout | null = null;
+    private timeout: NodeJS.Timeout | null = null;
+    private isRunning: boolean = false;
+    private intervalMs: number = 3600000; // Default 1 hour
 
     addTask(name: string, task: RefreshTask) {
         this.tasks.set(name, task);
     }
 
-    async start(intervalMs: number = 3600000) { // Default 1 hour
-        if (this.interval) return;
+    async start(intervalMs: number = 3600000) { 
+        if (this.timeout) return;
+        this.intervalMs = intervalMs;
 
         // Run once immediately
         await this.runAll();
 
-        this.interval = setInterval(() => this.runAll(), intervalMs);
+        // Schedule next run
+        this.scheduleNext();
+    }
+
+    private scheduleNext() {
+        if (this.timeout) clearTimeout(this.timeout);
+        this.timeout = setTimeout(() => {
+            this.runAll().finally(() => this.scheduleNext());
+        }, this.intervalMs);
     }
 
     async runAll() {
-        console.log("CacheManager: Starting background refreshes...");
-        for (const [name, task] of this.tasks.entries()) {
-            try {
-                console.log(`CacheManager: Refreshing ${name}...`);
-                await task();
-            } catch (err) {
-                console.error(`CacheManager: Task ${name} failed:`, err);
-            }
+        if (this.isRunning) {
+            console.warn("CacheManager: Already running. Skipping this cycle.");
+            return;
         }
-        await this.cleanupScanResults();
-        await this.cleanupWhois();
-        await this.cleanupHashCaches();
-        console.log("CacheManager: Background refreshes complete.");
+        this.isRunning = true;
+
+        try {
+            console.log("CacheManager: Starting background refreshes...");
+            const entries = Array.from(this.tasks.entries());
+            const results = await Promise.allSettled(
+                entries.map(async ([name, task]) => {
+                    console.log(`CacheManager: Refreshing ${name}...`);
+                    await task();
+                    console.log(`CacheManager: ${name} refresh complete.`);
+                })
+            );
+
+            for (let i = 0; i < results.length; i++) {
+                if (results[i].status === "rejected") {
+                    console.error(`CacheManager: Task ${entries[i][0]} failed:`, (results[i] as PromiseRejectedResult).reason);
+                }
+            }
+
+            // Cleanup tasks are lightweight -- run concurrently too
+            await Promise.allSettled([
+                this.cleanupScanResults(),
+                this.cleanupWhois(),
+                this.cleanupHashCaches(),
+            ]);
+            console.log("CacheManager: Background refreshes complete.");
+        } catch (err) {
+            console.error("CacheManager: RunAll general error:", err);
+        } finally {
+            this.isRunning = false;
+        }
     }
 
     async cleanupScanResults() {
@@ -44,8 +77,10 @@ class CacheManager {
             const now = Date.now();
             const expired = await redis.zrange(KEY_SCAN_EXPIRY, 0, now, { byScore: true });
             if (expired.length > 0) {
-                await redis.hdel(KEY_SCAN_HASH, ...(expired as string[]));
-                await redis.zrem(KEY_SCAN_EXPIRY, ...expired);
+                const pipe = redis.pipeline();
+                pipe.hdel(KEY_SCAN_HASH, ...(expired as string[]));
+                pipe.zrem(KEY_SCAN_EXPIRY, ...expired);
+                await pipe.exec();
             }
         } catch (err) {
             console.error("CacheManager: Scan-results cleanup failed:", err);
@@ -63,10 +98,10 @@ class CacheManager {
 
             if (expired.length > 0) {
                 console.log(`CacheManager: Cleaning up ${expired.length} expired WHOIS entries...`);
-                // Remove from Hash
-                await redis.hdel(KEY_WHOIS_DATA, ...expired as string[]);
-                // Remove from ZSET
-                await redis.zrem(KEY_WHOIS_EXPIRY, ...expired);
+                const pipe = redis.pipeline();
+                pipe.hdel(KEY_WHOIS_DATA, ...expired as string[]);
+                pipe.zrem(KEY_WHOIS_EXPIRY, ...expired);
+                await pipe.exec();
                 console.log("CacheManager: WHOIS cleanup complete.");
             }
         } catch (err) {
@@ -89,11 +124,12 @@ class CacheManager {
     }
 
     stop() {
-        if (this.interval) {
-            clearInterval(this.interval);
-            this.interval = null;
+        if (this.timeout) {
+            clearTimeout(this.timeout);
+            this.timeout = null;
         }
     }
 }
 
 export const cacheManager = new CacheManager();
+

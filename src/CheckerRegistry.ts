@@ -1,4 +1,4 @@
-import { Checker, CheckResult } from "./types";
+import { Checker, CheckResult, ParsedUrl } from "./types";
 
 class CheckerRegistry {
     private checkers: Checker[] = [];
@@ -11,18 +11,19 @@ class CheckerRegistry {
         return this.checkers;
     }
 
-    async runAll(url: string): Promise<{ checks: CheckResult[]; timing: Record<string, number> }> {
+    async runAll(url: string, parsed?: ParsedUrl): Promise<{ checks: CheckResult[]; timing: Record<string, number> }> {
         const timing: Record<string, number> = {};
         const TIMEOUT_MS = 2500; // 2.5s maximum per checker
 
         const checks = await Promise.all(
             this.checkers.map(async (checker) => {
                 const start = Date.now();
+                let timer: ReturnType<typeof setTimeout> | undefined;
                 try {
-                    const checkPromise = checker.check(url);
-                    const timeoutPromise = new Promise<CheckResult>((_, reject) =>
-                        setTimeout(() => reject(new Error("Timeout")), TIMEOUT_MS)
-                    );
+                    const checkPromise = checker.check(url, parsed);
+                    const timeoutPromise = new Promise<CheckResult>((_, reject) => {
+                        timer = setTimeout(() => reject(new Error("Timeout")), TIMEOUT_MS);
+                    });
 
                     const result = await Promise.race([checkPromise, timeoutPromise]);
                     timing[checker.name] = Date.now() - start;
@@ -35,6 +36,8 @@ class CheckerRegistry {
                     }
                     console.error(`Checker ${checker.name} failed:`, err);
                     return { score: 0, reason: `Checker ${checker.name} error` };
+                } finally {
+                    if (timer !== undefined) clearTimeout(timer);
                 }
             })
         );
@@ -44,3 +47,5 @@ class CheckerRegistry {
 }
 
 export const registry = new CheckerRegistry();
+
+

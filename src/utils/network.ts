@@ -47,31 +47,33 @@ export async function safeResolveHost(host: string): Promise<string[]> {
     return [host];
   }
 
-  // Resolve A & AAAA records
-  let ips: string[] = [];
-  try {
-    const A = await dns.resolve4(host).catch(() => []);
-    const AAAA = await dns.resolve6(host).catch(() => []);
-    ips = [...A, ...AAAA];
-  } catch (e) {
-    throw new Error("DNS resolution failed: " + (e as any).message);
-  }
+  // Run initial resolution and rebinding check in parallel for lower latency
+  const [resolveResult, rebindResult] = await Promise.all([
+    // Primary resolution: A + AAAA records
+    (async () => {
+      const A = await dns.resolve4(host).catch(() => []);
+      const AAAA = await dns.resolve6(host).catch(() => []);
+      return [...A, ...AAAA];
+    })(),
+    // Rebinding detection: independent lookup via dns.lookup
+    dns.lookup(host, { all: true }).catch(() => []),
+  ]);
+
+  const ips = resolveResult;
 
   if (ips.length === 0) {
     throw new Error("Host resolved but no valid A/AAAA records found");
   }
 
-  // Block private IPs
+  // Block private IPs from primary resolution
   for (const ip of ips) {
     if (isPrivateIP(ip)) {
       throw new Error(`Blocked private IP address: ${ip}`);
     }
   }
 
-  // DNS Rebinding Protection (re-resolve to check consistency)
-  const secondLookup = await dns.lookup(host, { all: true }).catch(() => []);
-  const reboundIPs = secondLookup.map((r) => r.address);
-
+  // Block private IPs from rebinding check
+  const reboundIPs = rebindResult.map((r) => r.address);
   for (const ip of reboundIPs) {
     if (isPrivateIP(ip)) {
       throw new Error(`Blocked via DNS rebinding check: ${ip}`);

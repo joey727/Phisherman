@@ -4,9 +4,16 @@ export interface CheckResult {
     reasons?: string[];
 }
 
+export interface ParsedUrl {
+    raw: string;
+    hostname: string;
+    protocol: string;
+    normalized: string;
+}
+
 export interface Checker {
     name: string;
-    check: (url: string) => Promise<CheckResult>;
+    check: (url: string, parsed?: ParsedUrl) => Promise<CheckResult>;
 }
 
 export interface ScanResult {
