@@ -6,11 +6,13 @@ export const apiLimiter = async (req: Request, res: Response, next: NextFunction
   const key = `ratelimit:${ip}`;
 
   try {
-    const requests = await redis.incr(key);
+    // Pipeline INCR + EXPIRE into a single HTTP round-trip
+    const pipe = redis.pipeline();
+    pipe.incr(key);
+    pipe.expire(key, 900);
+    const results = await pipe.exec();
 
-    if (requests === 1) {
-      await redis.expire(key, 900);
-    }
+    const requests = results[0] as number;
 
     if (requests > 100) {
       return res.status(429).json({
