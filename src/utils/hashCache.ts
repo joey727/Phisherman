@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 /**
  * A hash-based cache that stores entries in a single Redis hash plus a ZSET for expiry tracking.
  * This avoids key explosion while still allowing per-entry TTL management.
+ * All compound Redis operations use pipelines to minimize HTTP round-trips (important for Upstash).
  */
 export class HashCache {
     private readonly hashKey: string;
@@ -32,9 +33,11 @@ export class HashCache {
                 return entry.value as T;
             }
 
-            // Expired - opportunistically clean up
-            await redis.hdel(this.hashKey, fieldId);
-            await redis.zrem(this.expiryKey, fieldId);
+            // Expired - opportunistically clean up (pipelined)
+            const pipe = redis.pipeline();
+            pipe.hdel(this.hashKey, fieldId);
+            pipe.zrem(this.expiryKey, fieldId);
+            await pipe.exec();
             return null;
         } catch (err) {
             return null;
@@ -47,8 +50,10 @@ export class HashCache {
         const exp = Date.now() + ttl * 1000;
 
         try {
-            await redis.hset(this.hashKey, { [fieldId]: JSON.stringify({ exp, value }) });
-            await redis.zadd(this.expiryKey, { score: exp, member: fieldId });
+            const pipe = redis.pipeline();
+            pipe.hset(this.hashKey, { [fieldId]: JSON.stringify({ exp, value }) });
+            pipe.zadd(this.expiryKey, { score: exp, member: fieldId });
+            await pipe.exec();
         } catch (err) {
             console.error(`HashCache set error for ${this.hashKey}:`, err);
         }
@@ -57,8 +62,10 @@ export class HashCache {
     async delete(key: string): Promise<void> {
         const fieldId = this.fieldId(key);
         try {
-            await redis.hdel(this.hashKey, fieldId);
-            await redis.zrem(this.expiryKey, fieldId);
+            const pipe = redis.pipeline();
+            pipe.hdel(this.hashKey, fieldId);
+            pipe.zrem(this.expiryKey, fieldId);
+            await pipe.exec();
         } catch (err) {
             console.error(`HashCache delete error for ${this.hashKey}:`, err);
         }
@@ -70,8 +77,10 @@ export class HashCache {
             const now = Date.now();
             const expired = await redis.zrange(this.expiryKey, 0, now, { byScore: true });
             if (expired.length > 0) {
-                await redis.hdel(this.hashKey, ...(expired as string[]));
-                await redis.zrem(this.expiryKey, ...expired);
+                const pipe = redis.pipeline();
+                pipe.hdel(this.hashKey, ...(expired as string[]));
+                pipe.zrem(this.expiryKey, ...expired);
+                await pipe.exec();
                 return expired.length;
             }
         } catch (err) {
@@ -85,3 +94,4 @@ export class HashCache {
 export const gsbCache = new HashCache("gsb_cache", 3600); // Google Safe Browsing - 1 hour
 export const gwrCache = new HashCache("gwr_cache", 3600); // Google Web Risk - 1 hour  
 export const dnsCache = new HashCache("dns_cache", 3600); // DNS resolution - 1 hour
+
