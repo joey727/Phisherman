@@ -15,7 +15,8 @@ export async function loadURLHaus() {
   try {
     const lastUpdate = await redis.get(REDIS_KEY_LAST_UPDATE);
     // Refresh every 5 minutes (feed update rate) to stay current
-    const cacheExpired = !lastUpdate || (Date.now() - Number(lastUpdate) > 5 * 60 * 1000);
+    const cacheExpired =
+      !lastUpdate || Date.now() - Number(lastUpdate) > 5 * 60 * 1000;
 
     if (cacheExpired) {
       console.log("URLHaus cache expired. Starting stream refresh...");
@@ -33,7 +34,7 @@ export async function loadURLHaus() {
       const data = response.data;
       console.log(`URLHaus: Data received, length: ${data.length}`);
       console.log(`URLHaus: First 100 chars: ${data.substring(0, 100)}`);
-      
+
       const lines = data.split("\n");
       console.log(`URLHaus: Total lines: ${lines.length}`);
 
@@ -45,7 +46,8 @@ export async function loadURLHaus() {
       let totalProcessed = 0;
 
       for (const line of lines) {
-        if (totalProcessed === 0) console.log(`URLHaus: First line received: ${line.substring(0, 50)}`);
+        if (totalProcessed === 0)
+          console.log(`URLHaus: First line received: ${line.substring(0, 50)}`);
         // Skip comments and empty lines
         if (!line || line.startsWith("#")) continue;
 
@@ -71,23 +73,41 @@ export async function loadURLHaus() {
 
         if (urlBatch.length >= batchSize) {
           await (redis as any).sadd(tempKey, ...urlBatch);
+          // Update feed-specific bloom and metrics incrementally
+          try {
+            const { ingestUrls } = await import("../feeds/ingest");
+            await ingestUrls(REDIS_KEY_BLACKLIST, urlBatch, { batchSize: 500 });
+          } catch (err) {
+            console.warn("URLHaus: ingest helper failed:", String(err));
+          }
           urlBatch.length = 0;
 
           // Yield to event loop to keep server responsive
-          await new Promise(resolve => setImmediate(resolve));
+          await new Promise((resolve) => setImmediate(resolve));
         }
       }
 
       // Write remaining URLs
       if (urlBatch.length > 0) {
         await (redis as any).sadd(tempKey, ...urlBatch);
+        try {
+          const { ingestUrls } = await import("../feeds/ingest");
+          await ingestUrls(REDIS_KEY_BLACKLIST, urlBatch, { batchSize: 500 });
+        } catch (err) {
+          console.warn(
+            "URLHaus: ingest helper failed on final batch:",
+            String(err),
+          );
+        }
       }
 
       if (totalProcessed > 0) {
         // Atomic swap
         await redis.rename(tempKey, REDIS_KEY_BLACKLIST);
         await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
-        console.log(`URLHaus Redis cache populated with ${totalProcessed} entries (Streamed).`);
+        console.log(
+          `URLHaus Redis cache populated with ${totalProcessed} entries (Streamed).`,
+        );
       } else {
         await redis.del(tempKey);
         console.warn("URLHaus stream processed 0 entries.");
@@ -102,7 +122,10 @@ export async function loadURLHaus() {
   }
 }
 
-export async function checkURLHaus(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
+export async function checkURLHaus(
+  url: string,
+  _parsed?: ParsedUrl,
+): Promise<CheckResult> {
   try {
     const normalizedUrl = normalize(url);
     const isMember = await redis.sismember(REDIS_KEY_BLACKLIST, normalizedUrl);
@@ -124,7 +147,6 @@ export const URLHausChecker: Checker = {
   name: "urlhaus",
   check: checkURLHaus,
 };
-
 
 function normalize(urlStr: string): string {
   try {
