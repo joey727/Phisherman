@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: phisherman
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: ENABLE_FEEDS
+        value: "true"
+      - key: ENABLE_CONTINUOUS_FEEDS
+        value: "false"
+      - key: ENABLE_WORKER
+        value: "false"
+      - key: SCAN_CACHE_SAFE_RESULTS
+        value: "false"
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: GOOGLE_SAFE_API_KEY
+        sync: false
+      - key: WEBRISK_API_KEY
+        sync: false
+      - key: VIRUSTOTAL_API_KEY
+        sync: false

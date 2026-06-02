@@ -1,12 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "node16",
+    "moduleResolution": "node16",
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
+    "isolatedModules": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "types": [
@@ -19,8 +20,7 @@
     "resolveJsonModule": true
   },
   "include": [
-    "src",
-    "__tests__/phishtank.test.ts"
+    "src"
   ],
   "exclude": [
     "node_modules",

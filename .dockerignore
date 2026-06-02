@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+.git
+.github
+.env
+.env.*
+*.tsbuildinfo
+__tests__
+loadtest
+ml-service
+README.md
