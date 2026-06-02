@@ -6,8 +6,15 @@ export async function mlCheck(
   parsed?: ParsedUrl,
 ): Promise<CheckResult> {
   try {
-    // meta can be extended in future; for now pass empty
-    const { score, reasons } = await scoreUrlMl(url, {});
+    // Pass enrichment context so the ML model can use domain age, prior scores, etc.
+    const meta: Record<string, any> = {};
+
+    if (parsed) {
+      meta.hostname = parsed.hostname;
+      meta.protocol = parsed.protocol;
+    }
+
+    const { score, reasons } = await scoreUrlMl(url, meta);
     return { score, reasons };
   } catch (err) {
     return { score: 0 };
