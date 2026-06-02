@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import redis from "../utils/redis";
 import readline from "node:readline";
 import { Checker, CheckResult, ParsedUrl } from "../types";
+import { ingestUrls } from "../feeds/ingest";
 
 const FEED = "https://urlhaus.abuse.ch/downloads/csv_online/"; // use direct CSV export link
 const REDIS_KEY_BLACKLIST = "urlhaus_blacklist";
@@ -75,7 +76,6 @@ export async function loadURLHaus() {
           await (redis as any).sadd(tempKey, ...urlBatch);
           // Update feed-specific bloom and metrics incrementally
           try {
-            const { ingestUrls } = await import("../feeds/ingest");
             await ingestUrls(REDIS_KEY_BLACKLIST, urlBatch, { batchSize: 500 });
           } catch (err) {
             console.warn("URLHaus: ingest helper failed:", String(err));
@@ -91,7 +91,6 @@ export async function loadURLHaus() {
       if (urlBatch.length > 0) {
         await (redis as any).sadd(tempKey, ...urlBatch);
         try {
-          const { ingestUrls } = await import("../feeds/ingest");
           await ingestUrls(REDIS_KEY_BLACKLIST, urlBatch, { batchSize: 500 });
         } catch (err) {
           console.warn(

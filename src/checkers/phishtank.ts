@@ -6,6 +6,8 @@ import readline from "node:readline";
 import zlib from "node:zlib";
 import { BloomFilter } from "../utils/bloom";
 import { Checker, CheckResult, ParsedUrl } from "../types";
+import { getBloomStore } from "../utils/bloomStore";
+import { incMetric } from "../utils/metrics";
 
 dotenv.config();
 
@@ -222,7 +224,6 @@ export async function checkPhishTank(
     try {
       // Use BloomStore abstraction which prefers RedisBloom when enabled.
       try {
-        const { getBloomStore } = await import("../utils/bloomStore");
         const store = await getBloomStore(REDIS_KEY_BLOOM);
         const exists = await store.has(url);
         if (exists) {
@@ -254,7 +255,6 @@ export async function checkPhishTank(
     try {
       await (redis as any).rpush("analysis_queue", url);
       try {
-        const { incMetric } = await import("../utils/metrics");
         await incMetric("enqueued_for_analysis", 1);
       } catch {}
     } catch (e) {
