@@ -12,6 +12,7 @@ A phishing URL detection API built with Node.js, Express, and TypeScript. Phishe
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Deployment](#deployment)
+- [ML and Malware Setup](#ml-and-malware-setup)
 - [Project Structure](#project-structure)
 - [Development](#development)
 - [Performance](#performance)
@@ -23,7 +24,7 @@ A phishing URL detection API built with Node.js, Express, and TypeScript. Phishe
 
 ### Multi-Source Threat Intelligence
 
-Phisherman cross-references URLs against six independent sources to maximize detection accuracy:
+Phisherman cross-references URLs against multiple independent sources to maximize detection accuracy:
 
 | Source | Type | Update Interval |
 |--------|------|----------------|
@@ -33,6 +34,7 @@ Phisherman cross-references URLs against six independent sources to maximize det
 | PhishStats | JSON API (last 20k entries) | 90 minutes |
 | Google Safe Browsing | Real-time API (v4) | Per-request (cached 1h) |
 | Google Web Risk | Real-time API (v1) | Per-request (cached 1h) |
+| VirusTotal | Real-time malware/phishing reputation API | Per-request (cached 1h) |
 
 ### Heuristic Analysis
 
@@ -43,6 +45,16 @@ Detects common phishing patterns:
 - Hyphens in domain name
 - Missing HTTPS
 - Recently registered domains (<90 days via WHOIS)
+- Punycode/IDN homograph indicators
+- Data URI evasion patterns
+- URL shorteners and excessive subdomain depth
+
+### ML and Malware Detection
+
+Phisherman includes two malware-aware additions:
+
+- A VirusTotal checker that scores malicious and suspicious engine detections, adds malware/phishing category reasons, caches results, and respects the free-tier request rate with `VT_RATE_LIMIT`.
+- An optional FastAPI ML service in `ml-service/` that loads an XGBoost model and exposes `/predict`. The Node API calls it when `ML_SERVICE_URL` is set and falls back to local heuristic ML scoring if the service is unavailable.
 
 ### Network Security
 
@@ -78,9 +90,14 @@ Request --> Express --> Rate Limiter --> Scanner
                               |            |            |
                          Heuristics   Feed Lookups   API Checks
                          (+ WHOIS)   (URLHaus,      (Safe Browsing,
-                          (+ DNS)    PhishTank,      Web Risk)
+                          (+ DNS)    PhishTank,      Web Risk,
                                      OpenPhish,
-                                     PhishStats)
+                                     PhishStats)     VirusTotal)
+                              |            |            |
+                              +------------+------------+
+                                           |
+                                      Optional ML
+                                  (local or ML service)
                               |            |            |
                               +------------+------------+
                                            |
@@ -131,6 +148,11 @@ UPSTASH_REDIS_REST_TOKEN=your-token
 GOOGLE_SAFE_API_KEY=your-key
 WEBRISK_API_KEY=your-key
 
+# Optional -- malware and ML checks
+VIRUSTOTAL_API_KEY=your-key
+VT_RATE_LIMIT=4
+ML_SERVICE_URL=http://localhost:8080
+
 # Optional -- PhishTank custom URL
 PHISHTANK_API_URL=https://data.phishtank.com/data/online-valid.csv.gz
 
@@ -175,6 +197,7 @@ Analyze a URL for phishing indicators.
   "url": "https://suspicious-site.com/login",
   "score": 73,
   "verdict": "phishing",
+  "threatType": "phishing",
   "reasons": [
     "Contains suspicious keywords",
     "Domain is recently created (<90 days)",
@@ -210,6 +233,9 @@ Analyze a URL for phishing indicators.
 | `UPSTASH_REDIS_REST_TOKEN` | Yes | -- | Upstash Redis auth token |
 | `GOOGLE_SAFE_API_KEY` | No | -- | Google Safe Browsing v4 API key |
 | `WEBRISK_API_KEY` | No | -- | Google Web Risk v1 API key |
+| `VIRUSTOTAL_API_KEY` | No | -- | VirusTotal API key for malware/phishing reputation |
+| `VT_RATE_LIMIT` | No | 4 | VirusTotal requests per minute per API process |
+| `ML_SERVICE_URL` | No | -- | Optional FastAPI ML inference service URL |
 | `PHISHTANK_API_URL` | No | CSV.GZ feed | Custom PhishTank data URL |
 | `PORT` | No | 4000 | Server listen port |
 | `SCAN_CACHE_SAFE_RESULTS` | No | false | Cache scan results with "safe" verdict |
@@ -246,6 +272,42 @@ The repository includes `render.yaml` for Docker-based Render deployment:
 
 Default Render-oriented settings use one HTTP worker (`WEB_CONCURRENCY=1`), scheduled feed refreshes, and no continuous poller or queue worker unless explicitly enabled.
 
+See [deployment.md](deployment.md) for the full production architecture, including the optional ML service and malware intelligence setup.
+
+---
+
+## ML and Malware Setup
+
+### VirusTotal
+
+VirusTotal support is optional. Add `VIRUSTOTAL_API_KEY` to enable real-time malware/phishing reputation checks:
+
+```env
+VIRUSTOTAL_API_KEY=your-key
+VT_RATE_LIMIT=4
+```
+
+The checker caches results for one hour, caches 404/error states for 15 minutes, and skips requests once the local token bucket is exhausted instead of slowing the scan path.
+
+### ML Service
+
+The ML service is a separate FastAPI app under `ml-service/`. It loads `ml-service/models/phishing_xgboost.joblib`, exposes `/health` and `/predict`, and falls back to heuristic scoring when the model is unavailable.
+
+Run locally:
+
+```bash
+cd ml-service
+docker compose up --build
+```
+
+Then point the Node API at it:
+
+```env
+ML_SERVICE_URL=http://localhost:8080
+```
+
+For production, deploy the ML service separately from the Node API and set `ML_SERVICE_URL` on the API service to the ML service URL. Keeping the ML service separate avoids coupling Python dependency and model memory usage to the public API process.
+
 ### Docker Compose (example)
 
 ```yaml
@@ -275,6 +337,7 @@ src/
     openPhish.ts        # OpenPhish feed checker
     googleSafeBrowsing.ts  # Google Safe Browsing API
     googleWebRisk.ts    # Google Web Risk API
+    virusTotal.ts       # VirusTotal malware/phishing reputation API
     urlHaus.ts          # URLHaus feed checker
     phishtank.ts        # PhishTank feed checker
     phishStats.ts       # PhishStats API checker
@@ -287,6 +350,7 @@ src/
 __tests__/              # Jest test suite
 scripts/
   benchmark.ts          # Performance benchmarking script
+ml-service/             # Optional FastAPI/XGBoost inference service
 ```
 
 ---

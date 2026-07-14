@@ -7,13 +7,32 @@ import { loadPhishStats } from "./checkers/phishStats";
 import { startContinuousFeeds } from "./feeds/continuous";
 import { runWorkerLoop } from "./analysis/worker";
 import { initCluster, shutdownClusterWorkers } from "./cluster";
+import { hashApiKey, createApiKey } from "./utils/apiKeys";
+import { verifyApiKey } from "./utils/apiKeys";
 import cluster from "node:cluster";
 
 // Initialize cluster: separates background tasks to Master, HTTP server to Workers
 initCluster(startWorker, startMaster);
 
+// Bootstrap the admin API key from env var
+async function bootstrapAdminKey() {
+  const adminKey = process.env.ADMIN_API_KEY;
+  if (!adminKey) return;
+
+  const existing = await verifyApiKey(adminKey);
+  if (!existing) {
+    try {
+      await createApiKey("admin-bootstrap", "enterprise");
+      console.log("Admin API key bootstrapped in Redis.");
+    } catch (err) {
+      console.error("Failed to bootstrap admin API key:", err);
+    }
+  }
+}
+
 // Master process background tasks
-function startMaster() {
+async function startMaster() {
+  await bootstrapAdminKey();
   // Register background tasks (only if enabled)
   if ((process.env.ENABLE_FEEDS || "true").toLowerCase() !== "false") {
     cacheManager.addTask("urlhaus", loadURLHaus);

@@ -25,3 +25,30 @@ export interface ScanResult {
     mlConfidence?: number;
     executionTimeMs?: Record<string, number>;
 }
+
+export type ApiKeyTier = "free" | "pro" | "enterprise";
+
+export interface ApiKeyMetadata {
+    hash: string;
+    prefix: string;
+    name: string;
+    tier: ApiKeyTier;
+    enabled: boolean;
+    createdAt: number;
+    lastUsedAt: number | null;
+}
+
+export const TIER_CONFIGS: Record<ApiKeyTier, { maxRequests: number; windowSeconds: number; maxConcurrent: number }> = {
+    free: { maxRequests: 1000, windowSeconds: 3600, maxConcurrent: 10 },
+    pro: { maxRequests: 10000, windowSeconds: 3600, maxConcurrent: 50 },
+    enterprise: { maxRequests: 100000, windowSeconds: 3600, maxConcurrent: 200 },
+};
+
+declare global {
+    namespace Express {
+        interface Request {
+            apiKey?: ApiKeyMetadata;
+            isAdmin?: boolean;
+        }
+    }
+}
