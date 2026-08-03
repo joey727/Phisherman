@@ -6,9 +6,7 @@ import { SafeBrowsingChecker } from "./checkers/googleSafeBrowsing";
 import { URLHausChecker } from "./checkers/urlHaus";
 import { PhishTankChecker } from "./checkers/phishtank";
 import { WebRiskChecker } from "./checkers/googleWebRisk";
-import { MlChecker } from "./checkers/ml";
 import { PhishStatsChecker } from "./checkers/phishStats";
-import { VirusTotalChecker } from "./checkers/virusTotal";
 import { ScanResult, ParsedUrl } from "./types";
 
 // Register all checkers
@@ -19,8 +17,6 @@ registry.register(URLHausChecker);
 registry.register(PhishTankChecker);
 // registry.register(WebRiskChecker);
 registry.register(PhishStatsChecker);
-registry.register(VirusTotalChecker);
-registry.register(MlChecker);
 
 import redis from "./utils/redis";
 import crypto from "node:crypto";
@@ -28,8 +24,7 @@ import crypto from "node:crypto";
 const RESULT_CACHE_TTL_SECONDS = 300; // 5 minutes
 const SCAN_CACHE_HASH = "scan_results"; // single key
 const SCAN_CACHE_EXPIRY_ZSET = "scan_results_expiry"; // single key
-const CACHE_SAFE_RESULTS =
-  (process.env.SCAN_CACHE_SAFE_RESULTS || "").toLowerCase() === "true";
+const CACHE_SAFE_RESULTS = (process.env.SCAN_CACHE_SAFE_RESULTS || "").toLowerCase() === "true";
 
 function scanCacheId(url: string) {
   return crypto.createHash("sha256").update(url).digest("hex");
@@ -55,12 +50,8 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
   try {
     const cached = await redis.hget(SCAN_CACHE_HASH, id);
     if (cached) {
-      const parsed = JSON.parse(cached as string) as {
-        exp: number;
-        value: ScanResult;
-      };
-      if (parsed?.exp && parsed.exp > Date.now() && parsed.value)
-        return parsed.value;
+      const parsed = JSON.parse(cached as string) as { exp: number; value: ScanResult };
+      if (parsed?.exp && parsed.exp > Date.now() && parsed.value) return parsed.value;
       // expired; clean up opportunistically
       await redis.hdel(SCAN_CACHE_HASH, id);
       await redis.zrem(SCAN_CACHE_EXPIRY_ZSET, id);
@@ -76,7 +67,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
 
   const totalScore = Math.min(
     100,
-    checks.reduce((a, c) => a + c.score, 0),
+    checks.reduce((a, c) => a + c.score, 0)
   );
 
   const verdict =
@@ -84,27 +75,12 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
 
   // Collect all reasons
   const allReasons: string[] = [];
-  let threatType: "phishing" | "malware" | "unwanted_software" | "mixed" | undefined;
-  
   for (const c of checks) {
-    const checkReasons = [];
     if (c.reasons && Array.isArray(c.reasons)) {
-      checkReasons.push(...c.reasons);
       allReasons.push(...c.reasons);
     }
     if (c.reason) {
-      checkReasons.push(c.reason);
       allReasons.push(c.reason);
-    }
-    
-    // Determine threatType
-    for (const r of checkReasons) {
-      const lower = r.toLowerCase();
-      if (lower.includes("malware")) {
-        threatType = threatType && threatType !== "malware" ? "mixed" : "malware";
-      } else if (lower.includes("phishing")) {
-        threatType = threatType && threatType !== "phishing" ? "mixed" : "phishing";
-      }
     }
   }
 
@@ -112,7 +88,6 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
     url,
     score: totalScore,
     verdict,
-    threatType,
     reasons: allReasons,
     executionTimeMs: timing,
   };
@@ -122,9 +97,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
     // Also avoid caching "safe" results by default, since they are high-volume and low-value.
     if (CACHE_SAFE_RESULTS || result.verdict !== "safe") {
       const exp = Date.now() + RESULT_CACHE_TTL_SECONDS * 1000;
-      await redis.hset(SCAN_CACHE_HASH, {
-        [id]: JSON.stringify({ exp, value: result }),
-      });
+      await redis.hset(SCAN_CACHE_HASH, { [id]: JSON.stringify({ exp, value: result }) });
       await redis.zadd(SCAN_CACHE_EXPIRY_ZSET, { score: exp, member: id });
     }
   } catch (err) {
@@ -133,3 +106,4 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
 
   return result;
 }
+

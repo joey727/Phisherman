@@ -111,12 +111,6 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
   const domainInfo = parse(hostname);
   const domain = domainInfo.domain || hostname;
 
-  // Data URI check
-  if (url.toLowerCase().startsWith("data:text/html")) {
-    score += 40;
-    reasons.push("Data URI (common evasion technique)");
-  }
-
   // Length
   if (url.length > 200) {
     score += 10;
@@ -141,29 +135,6 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
   if (domain.includes("-")) {
     score += 6;
     reasons.push("Hyphens in domain");
-  }
-
-  // Punycode & IDN homograph attack check
-  if (hostname.includes("xn--")) {
-    score += 20;
-    reasons.push("Punycode/IDN domain (possible homograph attack)");
-  } else if (/[^a-zA-Z0-9.\-_]/.test(hostname)) {
-    score += 15;
-    reasons.push("Suspicious characters in hostname");
-  }
-
-  // URL shorteners
-  const shorteners = ["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly", "cutt.ly"];
-  if (shorteners.some(s => hostname.endsWith(s))) {
-    score += 10;
-    reasons.push("URL shortener used");
-  }
-
-  // Subdomain depth
-  const parts = hostname.split(".");
-  if (parts.length > 4) {
-    score += 10;
-    reasons.push("Excessive subdomain depth");
   }
 
   // HTTPS check

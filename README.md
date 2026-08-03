@@ -213,14 +213,6 @@ Analyze a URL for phishing indicators.
 | `PHISHTANK_API_URL` | No | CSV.GZ feed | Custom PhishTank data URL |
 | `PORT` | No | 4000 | Server listen port |
 | `SCAN_CACHE_SAFE_RESULTS` | No | false | Cache scan results with "safe" verdict |
-| `WEB_CONCURRENCY` | No | 1 | Number of HTTP worker processes |
-| `ENABLE_FEEDS` | No | true | Enable scheduled threat-feed refreshes |
-| `ENABLE_CONTINUOUS_FEEDS` | No | false | Enable the additional short-interval feed poller |
-| `ENABLE_WORKER` | No | false | Enable queued background URL analysis |
-| `RATE_LIMIT_MAX_REQUESTS` | No | 100 | Requests per IP per rate-limit window |
-| `RATE_LIMIT_WINDOW_SECONDS` | No | 900 | Rate-limit window size |
-| `MAX_CONCURRENT_REQUESTS_PER_IP` | No | 10 | Per-worker concurrent scan cap per IP |
-| `MAX_INFLIGHT_REQUESTS` | No | 200 | Per-worker global in-flight request cap |
 
 ---
 
@@ -234,17 +226,6 @@ The project uses a multi-stage Docker build to keep the production image lean (n
 docker build -t phisherman .
 docker run -p 4000:4000 --env-file .env phisherman
 ```
-
-### Render
-
-The repository includes `render.yaml` for Docker-based Render deployment:
-
-- `healthCheckPath: /health` enables HTTP readiness checks.
-- `autoDeployTrigger: checksPass` waits for GitHub CI before deploying.
-- `maxShutdownDelaySeconds: 30` gives the app time to drain during zero-downtime deploys.
-- Secrets such as Upstash, Google, and VirusTotal API keys are declared with `sync: false` and must be provided in Render.
-
-Default Render-oriented settings use one HTTP worker (`WEB_CONCURRENCY=1`), scheduled feed refreshes, and no continuous poller or queue worker unless explicitly enabled.
 
 ### Docker Compose (example)
 
@@ -264,8 +245,7 @@ services:
 
 ```
 src/
-  app.ts                # Express app factory, routes, middleware
-  index.ts              # Process startup, clustering, background tasks
+  index.ts              # Express app, routes, middleware
   Scanner.ts            # Orchestrates all checkers, caches results
   CheckerRegistry.ts    # Registry pattern for checker plugins
   CacheManager.ts       # Background feed refresh scheduler
@@ -297,7 +277,6 @@ scripts/
 
 ```bash
 npm test
-npm run test:ci
 ```
 
 ### Building
