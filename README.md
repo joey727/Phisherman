@@ -221,6 +221,7 @@ Analyze a URL for phishing indicators.
 | `RATE_LIMIT_WINDOW_SECONDS` | No | 900 | Rate-limit window size |
 | `MAX_CONCURRENT_REQUESTS_PER_IP` | No | 10 | Per-worker concurrent scan cap per IP |
 | `MAX_INFLIGHT_REQUESTS` | No | 200 | Per-worker global in-flight request cap |
+| `ML_FEEDBACK_ENABLED` | No | false | Log scanned URLs to Redis `scan_log` for ML retraining feedback |
 
 ---
 
@@ -299,6 +300,44 @@ scripts/
 npm test
 npm run test:ci
 ```
+
+### End-to-End Testing
+
+```bash
+npm run test:e2e
+```
+
+Runs a real end-to-end suite (`e2e/scan.e2e.ts`) against the live pipeline — no mocking of the app, Scanner, registry, or checkers. It boots the actual Express server and exercises HTTP → backpressure → rate limiting → validation → `analyzeUrl` → Redis result cache → all checkers → scoring → verdict against a matrix of safe/suspicious/phishing URLs.
+
+Requirements and caveats:
+
+- Needs live Upstash Redis credentials in `.env` (the suite clears `scan_results`, `whois_data`, and `ratelimit:*` keys before and after, but run it against a dev instance if you want to avoid touching shared data).
+- Requires outbound network access (DNS, external threat-intelligence APIs, optional ML service).
+- Only the `whois-json` library is mocked, because it is pure-ESM and Jest's CJS loader cannot import it — the WHOIS port-43 lookup itself is a network boundary, so the rest of the pipeline stays real and deterministic.
+- If `ML_SERVICE_URL` is reachable, the ML checker returns `ML:` reasons; otherwise it degrades to local heuristics. Either way the suite passes.
+- Intentionally **excluded from CI** (`npm run test:ci` / the `build-and-test` job) because it requires real Redis and network. Run it locally or add Redis secrets to CI if you want it gated there.
+
+### Self-Training Data Pipeline
+
+The ML model can retrain itself (safely) on an automated schedule. See `ml-service/training/pipeline.py`.
+
+**How it collects data (never from the model's own verdicts):**
+
+- **Positives** — public threat-intel feeds pulled directly by the pipeline: URLHaus, PhishTank, OpenPhish, PhishStats.
+- **Delayed positives (active learning)** — the Node app can log every scanned URL to a Redis ZSET `scan_log` (`src/Scanner.ts`, gated by `ML_FEEDBACK_ENABLED`, 45-day retention, capped at 200k). If a URL that was scanned earlier ends up in a feed later, it becomes a high-value positive (an earlier under-detection).
+- **Negatives** — a benign corpus (Tranco top list) plus `scan_log` URLs not present in any feed.
+- **Fallback** — synthetic benign/phishing patterns if a source is unreachable, so the job never crashes on a flaky feed.
+
+**Safe promotion:** before writing `ml-service/models/phishing_xgboost.joblib`, the new model is evaluated on a fixed benchmark set and only replaces the current model if its benchmark F1 is `>=` the last-promoted model's. A worse model is never deployed. Runs and metrics are recorded in `ml-service/models/metrics.json`.
+
+**Weekly orchestration** (`.github/workflows/retrain.yml`, cron `0 3 * * 1`):
+1. Runner fetches data → trains → evaluates → promotes only on improvement.
+2. If promoted, the model + `metrics.json` are committed to `main` via a PAT.
+3. That push triggers CI (`checksPass`) → Render rebuilds the `ml-service` image with the new model.
+
+**Required GitHub secrets:** `GH_PAT` (contents + actions write — the default `GITHUB_TOKEN` cannot push to `main` or re-trigger workflows), `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (only needed to read the delayed-feedback `scan_log`). The delayed-feedback phase is supported but you can run the feed-based core loop without the Redis secrets.
+
+**Manual run:** `cd ml-service && pip install -r requirements.txt && python -m training.pipeline --small` (use a `.venv`; needs `brew install libomp` on macOS).
 
 ### Building
 

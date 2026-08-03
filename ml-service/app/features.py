@@ -40,6 +40,17 @@ SUSPICIOUS_KEYWORDS = frozenset([
     "credential", "signin", "billing", "invoice", "refund", "reward",
 ])
 
+# Registrable/apex domains that are legitimate well-known brands. Being a
+# trusted apex means the site is the official brand site, so keyword/brand
+# impersonation signals are suppressed there. A phishing URL that spoofs a
+# brand lives on a *different* apex (e.g. paypal-secure-verify.tk), which is
+# NOT in this set and therefore still gets flagged.
+TRUSTED_APEX = BRAND_KEYWORDS | frozenset([
+    "github", "wikipedia", "reddit", "stackoverflow", "mozilla", "bing",
+    "bbc", "nytimes", "office", "githubusercontent", "wix", "medium",
+    "wordpress", "squarespace", "gitlab", "cloudflare", "vercel", "netlify",
+])
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -95,9 +106,20 @@ def _has_punycode(hostname: str) -> bool:
     return any(label.startswith("xn--") for label in hostname.split("."))
 
 
-def _brand_impersonation_count(url_lower: str) -> int:
-    """Count how many brand keywords appear in the URL."""
-    return sum(1 for brand in BRAND_KEYWORDS if brand in url_lower)
+def _brand_impersonation_count(url_lower: str, apex_domain: str) -> int:
+    """Count brand keywords, excluding the brand that is itself the registrable domain.
+
+    Visiting the official brand site (e.g. `google` for `google.com`) is not
+    impersonation; impersonation means a brand keyword appears in a URL whose own
+    apex/registered domain is a different brand or a suspicious domain.
+    """
+    count = 0
+    for brand in BRAND_KEYWORDS:
+        if apex_domain and brand == apex_domain:
+            continue
+        if brand in url_lower:
+            count += 1
+    return count
 
 
 def _suspicious_keyword_count(url_lower: str) -> int:
@@ -257,8 +279,15 @@ def extract_features(url: str, meta: Optional[dict] = None) -> np.ndarray:
     features[30] = len(parsed.scheme)
 
     # --- Suspicious patterns (31-39) ---
-    features[31] = _brand_impersonation_count(url_lower)
-    features[32] = _suspicious_keyword_count(url_lower)
+    apex = (ext.domain or "").lower()
+    if apex and apex in TRUSTED_APEX:
+        # Official brand/popular site: keywords and brand-impersonation are NOT
+        # suspicious here (e.g. https://www.paypal.com/login is legitimate).
+        features[31] = 0.0
+        features[32] = 0.0
+    else:
+        features[31] = _brand_impersonation_count(url_lower, ext.domain or "")
+        features[32] = _suspicious_keyword_count(url_lower)
     features[33] = 1.0 if any(s in hostname for s in SHORTENER_DOMAINS) else 0.0
     features[34] = 1.0 if url_lower.startswith("data:") else 0.0
     features[35] = 1.0 if re.search(r"[A-Za-z0-9+/]{40,}={0,2}", url) else 0.0

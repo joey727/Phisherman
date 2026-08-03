@@ -1,0 +1,34 @@
+{
+  "trained_at": "2026-08-03T22:52:07.205230+00:00",
+  "model_file": "phishing_xgboost.joblib",
+  "training": {
+    "precision": 0.9973309608540926,
+    "recall": 0.9964444444444445,
+    "f1": 0.9968875055580257,
+    "accuracy": 0.9968888888888889,
+    "training_n": 30000,
+    "validation_n": 4500,
+    "pos_rate_train": 0.5
+  },
+  "benchmark": {
+    "benchmark_n": 28,
+    "benchmark_phishing": 14,
+    "benchmark_benign": 14,
+    "precision": 0.8235,
+    "recall": 1.0,
+    "f1": 0.9032,
+    "tp": 14,
+    "fp": 3,
+    "tn": 11,
+    "fn": 0
+  },
+  "was_better_than": 0.7,
+  "data": {
+    "feed_positives": 85557,
+    "delayed_positives": 0,
+    "delayed_negatives": 0,
+    "benign_pool": 42974,
+    "train_positives": 15000,
+    "train_negatives": 15000
+  }
+}
