@@ -1,0 +1,61 @@
+config:
+  target: "http://localhost:4000"
+  phases:
+    - duration: 30
+      arrivalRate: 5
+      name: "Phase 1: Warm up"
+    - duration: 120
+      arrivalRate: 10
+      rampTo: 100
+      name: "Phase 2: Ramp up load"
+    - duration: 180
+      arrivalRate: 100
+      name: "Phase 3: Sustained load"
+    - duration: 60
+      arrivalRate: 500
+      name: "Phase 4: Stress test"
+  environments:
+    smoke:
+      phases:
+        - duration: 30
+          arrivalRate: 5
+          name: "Smoke Test"
+    load:
+      phases:
+        - duration: 120
+          arrivalRate: 10
+          rampTo: 100
+          name: "Ramp up load"
+        - duration: 180
+          arrivalRate: 100
+          name: "Sustained load"
+    stress:
+      phases:
+        - duration: 60
+          arrivalRate: 100
+          rampTo: 500
+          name: "Stress load"
+  plugins:
+    expect: {}
+  ensure:
+    p95: 500
+    maxErrorRate: 1
+  variables:
+    urlPayloads:
+      - '{"url": "https://google.com"}'
+      - '{"url": "http://192.168.1.1/login"}'
+      - '{"url": "https://secure-apple-update.com/verify"}'
+      - '{"url": "http://example.com"}'
+
+scenarios:
+  - name: "Scan endpoints"
+    flow:
+      - loop:
+          - post:
+              url: "/api/check"
+              headers:
+                Content-Type: "application/json"
+              body: "{{ $loopElement }}"
+              expect:
+                - statusCode: [200, 429, 503]
+        over: urlPayloads

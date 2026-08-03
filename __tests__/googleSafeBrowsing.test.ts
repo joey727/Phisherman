@@ -2,6 +2,13 @@ import axios from "axios";
 import { SafeBrowsingChecker } from "../src/checkers/googleSafeBrowsing";
 
 jest.mock("axios");
+jest.mock("../src/utils/hashCache", () => ({
+    gsbCache: {
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue(undefined),
+    },
+}));
+
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 describe("SafeBrowsingChecker", () => {
@@ -47,4 +54,3 @@ describe("SafeBrowsingChecker", () => {
         expect(result.score).toBe(0);
     });
 });
-
