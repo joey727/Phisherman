@@ -3,3 +3,8 @@ dist/
 .env
 .DS_Store
 backend/scripts/benchmark.ts
+*.tsbuildinfo
+coverage/
+ml-service/.venv/
+__pycache__/
+.pytest_cache/

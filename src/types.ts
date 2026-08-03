@@ -20,6 +20,8 @@ export interface ScanResult {
     url: string;
     score: number;
     verdict: "phishing" | "suspicious" | "safe";
+    threatType?: "phishing" | "malware" | "unwanted_software" | "mixed";
     reasons: string[];
+    mlConfidence?: number;
     executionTimeMs?: Record<string, number>;
 }

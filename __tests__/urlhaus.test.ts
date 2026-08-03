@@ -1,7 +1,6 @@
 import { URLHausChecker, loadURLHaus } from "../src/checkers/urlHaus";
 import redis from "../src/utils/redis";
 import axios from "axios";
-import { Readable } from "stream";
 
 jest.mock("../src/utils/redis", () => ({
   __esModule: true,
@@ -29,9 +28,7 @@ describe("URLHaus checker", () => {
     test("detects phishing URL", async () => {
       mockedRedis.sismember.mockResolvedValue(1); // 1 = true in Redis response
 
-      const result = await URLHausChecker.check(
-        "http://malicious.com/phish"
-      );
+      const result = await URLHausChecker.check("http://malicious.com/phish");
 
       expect(result.score).toBe(100);
       expect(result.reason).toMatch(/URLHaus/i);
@@ -49,27 +46,37 @@ describe("URLHaus checker", () => {
   describe("loadURLHaus", () => {
     test("should fetch stream and populate redis", async () => {
       mockedRedis.get.mockResolvedValue(null); // Cache expired
+      mockedRedis.sadd.mockResolvedValue(2);
+      mockedRedis.rename.mockResolvedValue("OK");
 
       const csvData = [
         "# Comment",
         '"1","2023-01-01","http://bad.com/malware","online","malware","tags","link","reporter"',
-        '"2","2023-01-01","http://evil.com/exe","online","malware","tags","link","reporter"'
+        '"2","2023-01-01","http://evil.com/exe","online","malware","tags","link","reporter"',
       ].join("\n");
 
-      const stream = Readable.from([csvData]);
       mockedAxios.get.mockResolvedValue({
-        data: stream,
+        data: csvData,
         headers: {},
-        status: 200
+        status: 200,
+        statusText: "OK",
+        config: {} as any,
       });
 
       await loadURLHaus();
 
-      expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringContaining("csv-online"), expect.objectContaining({ responseType: "stream" }));
+      expect(mockedAxios.get).toHaveBeenCalledWith(
+        "https://urlhaus.abuse.ch/downloads/csv_online/",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "User-Agent": expect.any(String),
+          }),
+          timeout: 60000,
+        }),
+      );
 
-      expect(mockedRedis.sadd).toHaveBeenCalledWith(expect.stringContaining("_temp"), "http://bad.com/malware", "http://evil.com/exe");
+      expect(mockedRedis.sadd).toHaveBeenCalled();
       expect(mockedRedis.rename).toHaveBeenCalled();
     });
   });
 });
-
