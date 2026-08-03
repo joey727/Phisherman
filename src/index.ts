@@ -1,93 +1,73 @@
-import { createApp } from "./app";
+import express, { Request, Response } from "express";
+import cors from "cors";
+import { analyzeUrl } from "./Scanner";
+import { apiLimiter } from "./middleware/ratelimit";
 import { cacheManager } from "./CacheManager";
 import { loadURLHaus } from "./checkers/urlHaus";
 import { loadPhishTank } from "./checkers/phishtank";
 import { loadOpenPhish } from "./checkers/openPhish";
 import { loadPhishStats } from "./checkers/phishStats";
-import { startContinuousFeeds } from "./feeds/continuous";
-import { runWorkerLoop } from "./analysis/worker";
-import { initCluster, shutdownClusterWorkers } from "./cluster";
-import cluster from "node:cluster";
 
-// Initialize cluster: separates background tasks to Master, HTTP server to Workers
-initCluster(startWorker, startMaster);
+const app = express();
+app.set("trust proxy", 1);
+app.use(express.json());
+app.use(cors());
 
-// Master process background tasks
-function startMaster() {
-  // Register background tasks (only if enabled)
-  if ((process.env.ENABLE_FEEDS || "true").toLowerCase() !== "false") {
-    cacheManager.addTask("urlhaus", loadURLHaus);
-    cacheManager.addTask("phishtank", loadPhishTank);
-    cacheManager.addTask("openphish", loadOpenPhish);
-    cacheManager.addTask("phishstats", loadPhishStats);
-    cacheManager.start(
-      Number(process.env.CACHE_MANAGER_INTERVAL_MS) || undefined,
-    );
+// Register background tasks
+cacheManager.addTask("urlhaus", loadURLHaus);
+cacheManager.addTask("phishtank", loadPhishTank);
+cacheManager.addTask("openphish", loadOpenPhish);
+cacheManager.addTask("phishstats", loadPhishStats);
+cacheManager.start();
+
+// Health check endpoint (Render uses this to verify the service is alive)
+app.get("/health", (_req: Request, res: Response) => {
+  return res.json({ status: "ok" });
+});
+
+// Rate limiter scoped to the scan endpoint only (avoids Redis overhead on health checks)
+app.post("/api/check", apiLimiter, async (req: Request, res: Response) => {
+  const { url } = req.body;
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "Missing 'url' in body" });
   }
 
-  // Start continuous poller (independent, smaller memory footprint)
-  if (
-    (process.env.ENABLE_CONTINUOUS_FEEDS || "false").toLowerCase() === "true"
-  ) {
-    startContinuousFeeds();
+  try {
+    const result = await analyzeUrl(url);
+    return res.json(result);
+  } catch (err) {
+    console.error("analyze error:", err);
+    return res.status(500).json({ error: "Server error", detail: String(err) });
   }
+});
 
-  // Start worker only when explicitly enabled (useful on low-memory hosts)
-  if ((process.env.ENABLE_WORKER || "false").toLowerCase() === "true") {
-    runWorkerLoop();
-  }
+const port = process.env.PORT || 4000;
+const server = app.listen(port, () => console.log(`Phisherman backend listening on ${port}`));
 
-  // Master graceful shutdown
-  const gracefulShutdownMaster = (signal: string) => {
-    console.log(`Master received ${signal}. Shutting down gracefully...`);
-    cacheManager.stop();
-    shutdownClusterWorkers(signal as NodeJS.Signals);
-    setTimeout(() => {
-      console.log("Master shutdown complete.");
-      process.exit(0);
-    }, 10_000).unref();
-  };
-
-  process.on("SIGTERM", () => gracefulShutdownMaster("SIGTERM"));
-  process.on("SIGINT", () => gracefulShutdownMaster("SIGINT"));
+// Graceful shutdown 
+function gracefulShutdown(signal: string) {
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+  cacheManager.stop();
+  server.close(() => {
+    console.log("HTTP server closed. Exiting.");
+    process.exit(0);
+  });
+  // Force exit after 10s if server.close() hangs
+  setTimeout(() => {
+    console.error("Forced shutdown after timeout.");
+    process.exit(1);
+  }, 10_000).unref();
 }
 
-// Worker process HTTP server
-function startWorker() {
-  const app = createApp();
-  const port = process.env.PORT || 4000;
-  const server = app.listen(port, () =>
-    console.log(`Phisherman worker ${process.pid} listening on ${port}`),
-  );
-
-  // Worker graceful shutdown
-  const gracefulShutdownWorker = (signal: string) => {
-    console.log(`Worker ${process.pid} received ${signal}. Draining connections...`);
-    server.close(() => {
-      console.log(`Worker ${process.pid} HTTP server closed. Exiting.`);
-      process.exit(0);
-    });
-    // Force exit after 10s if connections refuse to drain
-    setTimeout(() => {
-      console.error(`Worker ${process.pid} forced shutdown after timeout.`);
-      process.exit(1);
-    }, 10_000).unref();
-  };
-
-  process.on("SIGTERM", () => gracefulShutdownWorker("SIGTERM"));
-  process.on("SIGINT", () => gracefulShutdownWorker("SIGINT"));
-}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // Prevent silent crashes -- log and survive unhandled rejections
 process.on("unhandledRejection", (reason) => {
-  console.error(`Unhandled promise rejection (PID: ${process.pid}):`, reason);
+  console.error("Unhandled promise rejection:", reason);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error(`Uncaught exception (PID: ${process.pid}):`, err);
-  if (cluster.isWorker) {
-    process.exit(1); // Master will restart it
-  } else {
-    process.exit(1);
-  }
+  console.error("Uncaught exception:", err);
+  gracefulShutdown("uncaughtException");
 });

@@ -6,8 +6,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "nodemon src/index.ts",
-    "test": "jest",
-    "test:ci": "jest --runInBand"
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
