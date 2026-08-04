@@ -31,6 +31,38 @@ const SCAN_CACHE_EXPIRY_ZSET = "scan_results_expiry"; // single key
 const CACHE_SAFE_RESULTS =
   (process.env.SCAN_CACHE_SAFE_RESULTS || "").toLowerCase() === "true";
 
+// Delayed-feedback scan log (feeds ML self-training). When enabled, every scanned URL
+// is recorded (URL + timestamp) so the retraining pipeline can later label URLs that
+// were scored "safe" but subsequently appeared in a threat-intelligence feed.
+const ML_FEEDBACK_ENABLED =
+  (process.env.ML_FEEDBACK_ENABLED || "").toLowerCase() === "true";
+const SCAN_LOG_KEY = "scan_log";
+const SCAN_LOG_TTL_MS = 45 * 24 * 60 * 60 * 1000; // 45 days
+const SCAN_LOG_MAX = 200_000;
+let lastScanLogPrune = 0;
+
+async function logScanFeedback(url: string, result: ScanResult) {
+  if (!ML_FEEDBACK_ENABLED) return;
+  try {
+    const now = Date.now();
+    await redis.zadd(SCAN_LOG_KEY, { score: now, member: url });
+
+    // Prune old entries + cap size, at most once per hour.
+    if (now - lastScanLogPrune > 60 * 60 * 1000) {
+      lastScanLogPrune = now;
+      await redis.zremrangebyscore(SCAN_LOG_KEY, 0, now - SCAN_LOG_TTL_MS);
+      const size = Number((await redis.zcard(SCAN_LOG_KEY)) || 0);
+      if (size > SCAN_LOG_MAX) {
+        // Remove the oldest (lowest-score) members to stay within the cap.
+        await redis.zremrangebyrank(SCAN_LOG_KEY, 0, size - SCAN_LOG_MAX - 1);
+      }
+    }
+  } catch (err) {
+    // Feedback logging is best-effort; never fail a scan because of it.
+    console.error("Scan feedback log error:", err);
+  }
+}
+
 function scanCacheId(url: string) {
   return crypto.createHash("sha256").update(url).digest("hex");
 }
@@ -130,6 +162,8 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
   } catch (err) {
     console.error("Cache write error:", err);
   }
+
+  await logScanFeedback(url, result);
 
   return result;
 }

@@ -13,8 +13,9 @@ from typing import Optional
 
 import numpy as np
 import joblib
+import tldextract
 
-from .features import extract_features, FEATURE_NAMES, NUM_FEATURES
+from .features import extract_features, FEATURE_NAMES, NUM_FEATURES, TRUSTED_APEX
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,19 @@ def load_model() -> bool:
 
 def is_model_loaded() -> bool:
     return _model_loaded
+
+
+def is_trusted_apex(url: str) -> bool:
+    """True if the URL's effective apex (eTLD+1) is an official brand/popular site.
+
+    Phishing impersonators almost never obtain the real brand apex (attacker apexes
+    differ, e.g. paypal-secure-verify.tk), so a trusted apex is treated as benign.
+    """
+    try:
+        ext = tldextract.extract(url)
+        return bool(ext.domain and ext.domain.lower() in TRUSTED_APEX)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +171,17 @@ def predict(url: str, meta: Optional[dict] = None) -> dict:
     Returns a dict with: score, label, confidence, top_features, inference_time_ms
     """
     start = time.perf_counter()
+
+    # Trusted-apex guard: official brand/popular apex is treated as benign,
+    # overriding the static model which otherwise over-flags legit brand pages.
+    if is_trusted_apex(url):
+        return {
+            "score": 0,
+            "label": "safe",
+            "confidence": 0.0,
+            "top_features": [],
+            "inference_time_ms": round((time.perf_counter() - start) * 1000, 2),
+        }
 
     features = extract_features(url, meta)
 

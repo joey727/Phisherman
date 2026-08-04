@@ -202,20 +202,29 @@ def generate_dataset(n_samples: int = 10000) -> tuple[np.ndarray, np.ndarray]:
     return X[indices], y[indices]
 
 
+def generate_benign(n: int) -> list[str]:
+    """Generate n synthetic benign URLs from the benign patterns (fallback dataset)."""
+    return [
+        _generate_url(random.choice(BENIGN_PATTERNS), is_phishing=False)
+        for _ in range(n)
+    ]
+
+
+def generate_phishing(n: int) -> list[str]:
+    """Generate n synthetic phishing URLs from the phishing patterns (fallback dataset)."""
+    return [
+        _generate_url(random.choice(PHISHING_PATTERNS), is_phishing=True)
+        for _ in range(n)
+    ]
+
+
 # ---------------------------------------------------------------------------
-# Training
+# Shared training utilities (used by both the synthetic trainer and pipeline.py)
 # ---------------------------------------------------------------------------
 
-def train_model(n_samples: int = 20000):
-    """Train and save an XGBoost phishing classifier."""
-
-    logger.info(f"Generating {n_samples} training samples...")
-    X, y = generate_dataset(n_samples)
-    logger.info(f"Dataset: {X.shape[0]} samples, {X.shape[1]} features")
-    logger.info(f"Class distribution: {np.bincount(y)} (0=benign, 1=phishing)")
-
-    # XGBoost classifier
-    model = XGBClassifier(
+def build_classifier() -> XGBClassifier:
+    """Return a new classifier with the project's standard hyperparameters."""
+    return XGBClassifier(
         n_estimators=200,
         max_depth=6,
         learning_rate=0.1,
@@ -230,6 +239,58 @@ def train_model(n_samples: int = 20000):
         random_state=42,
         n_jobs=-1,
     )
+
+
+def train_on_dataset(
+    X: np.ndarray, y: np.ndarray, test_size: float = 0.15
+) -> tuple[XGBClassifier, dict]:
+    """
+    Hold-out trained by default split; returns (model, metrics).
+    Metrics dict: {precision, recall, f1, accuracy, n, pos_rate}.
+    """
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import (
+        precision_recall_fscore_support,
+        accuracy_score,
+    )
+
+    X_tr, X_va, y_tr, y_va = train_test_split(
+        X, y, test_size=test_size, stratify=y, random_state=42
+    )
+    clf = build_classifier()
+    clf.fit(X_tr, y_tr)
+
+    proba = clf.predict_proba(X_va)[:, 1]
+    pred = (proba >= 0.5).astype(int)
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        y_va, pred, average="binary", pos_label=1, zero_division=0
+    )
+    metrics = {
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+        "accuracy": float(accuracy_score(y_va, pred)),
+        "training_n": int(len(y)),
+        "validation_n": int(len(y_va)),
+        "pos_rate_train": float(y.mean()),
+    }
+    return clf, metrics
+
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+
+def train_model(n_samples: int = 20000):
+    """Train and save an XGBoost phishing classifier."""
+
+    logger.info(f"Generating {n_samples} training samples...")
+    X, y = generate_dataset(n_samples)
+    logger.info(f"Dataset: {X.shape[0]} samples, {X.shape[1]} features")
+    logger.info(f"Class distribution: {np.bincount(y)} (0=benign, 1=phishing)")
+
+    # XGBoost classifier
+    model = build_classifier()
 
     # Cross-validation
     logger.info("Running 5-fold stratified cross-validation...")
