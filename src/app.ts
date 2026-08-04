@@ -59,7 +59,8 @@ export function createApp() {
     }
 
     try {
-      const result = await analyzeUrl(url);
+      const tier = req.apiKey?.tier ?? "free";
+      const result = await analyzeUrl(url, { tier });
       return res.json(result);
     } catch (err) {
       console.error("analyze error:", err);

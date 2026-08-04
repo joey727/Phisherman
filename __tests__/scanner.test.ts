@@ -1,20 +1,28 @@
-jest.mock("../src/utils/redis", () => ({
-  get: jest.fn(),
-  set: jest.fn(),
-  hget: jest.fn().mockResolvedValue(null),
-  hset: jest.fn(),
-  zadd: jest.fn(),
-  del: jest.fn(),
-  sadd: jest.fn(),
-  rename: jest.fn(),
-  pipeline: jest.fn(() => ({
-    hset: jest.fn().mockReturnThis(),
-    zadd: jest.fn().mockReturnThis(),
-    hdel: jest.fn().mockReturnThis(),
-    zrem: jest.fn().mockReturnThis(),
-    exec: jest.fn().mockResolvedValue([1, 1]),
-  })),
-}));
+jest.mock("../src/utils/redis", () => {
+  const hsetCalls: { key: string; data: Record<string, string> }[] = [];
+  const mock = {
+    get: jest.fn(),
+    set: jest.fn(),
+    hget: jest.fn().mockResolvedValue(null),
+    hset: jest.fn((key: string, data: Record<string, string>) => {
+      hsetCalls.push({ key, data });
+      return Promise.resolve(1);
+    }),
+    zadd: jest.fn(),
+    del: jest.fn(),
+    sadd: jest.fn(),
+    rename: jest.fn(),
+    pipeline: jest.fn(() => ({
+      hset: jest.fn().mockReturnThis(),
+      zadd: jest.fn().mockReturnThis(),
+      hdel: jest.fn().mockReturnThis(),
+      zrem: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([1, 1]),
+    })),
+  };
+  mock.__hsetCalls = hsetCalls;
+  return mock;
+});
 
 jest.mock("../src/checkers/heuristics", () => ({ HeuristicsChecker: { name: "heuristics", check: jest.fn() } }));
 jest.mock("../src/checkers/openPhish", () => ({ OpenPhishChecker: { name: "openphish", check: jest.fn() } }));
@@ -41,6 +49,7 @@ jest.mock("../src/CheckerRegistry", () => ({
 
 import { analyzeUrl } from "../src/Scanner";
 import { registry } from "../src/CheckerRegistry";
+import redis from "../src/utils/redis";
 
 describe("Scanner aggregation", () => {
   test("returns correct verdict and aggregated data", async () => {
@@ -66,6 +75,54 @@ describe("Scanner aggregation", () => {
     const result = await analyzeUrl("http://bad-site.com");
     expect(result.score).toBe(100);
     expect(result.verdict).toBe("phishing");
+  });
+
+  test("defaults to free tier and returns tier in the result", async () => {
+    const result = await analyzeUrl("http://bad-site.com");
+
+    expect(result.tier).toBe("free");
+    expect(registry.runAll).toHaveBeenCalledWith(
+      "http://bad-site.com",
+      expect.anything(),
+      { tier: "free" },
+    );
+  });
+
+  test("passes an explicit tier into the registry and result", async () => {
+    const result = await analyzeUrl("http://bad-site.com", { tier: "pro" });
+
+    expect(result.tier).toBe("pro");
+    expect(registry.runAll).toHaveBeenCalledWith(
+      "http://bad-site.com",
+      expect.anything(),
+      { tier: "pro" },
+    );
+  });
+
+  test("uses tier-scoped cache keys so free/pro results never mix", async () => {
+    const mockedHsetCalls = (redis as unknown as { __hsetCalls: { key: string; data: Record<string, string> }[] }).__hsetCalls;
+    mockedHsetCalls.length = 0;
+
+    await analyzeUrl("http://mix-test.com", { tier: "free" });
+    await analyzeUrl("http://mix-test.com", { tier: "pro" });
+
+    expect(mockedHsetCalls.length).toBe(2);
+    const freeField = Object.keys(mockedHsetCalls[0].data)[0];
+    const proField = Object.keys(mockedHsetCalls[1].data)[0];
+    expect(freeField).not.toBe(proField);
+  });
+
+  test("pro and enterprise share the same cache key (identical checkers)", async () => {
+    const mockedHsetCalls = (redis as unknown as { __hsetCalls: { key: string; data: Record<string, string> }[] }).__hsetCalls;
+    mockedHsetCalls.length = 0;
+
+    await analyzeUrl("http://paid-shared.com", { tier: "pro" });
+    await analyzeUrl("http://paid-shared.com", { tier: "enterprise" });
+
+    expect(mockedHsetCalls.length).toBe(2);
+    const proField = Object.keys(mockedHsetCalls[0].data)[0];
+    const entField = Object.keys(mockedHsetCalls[1].data)[0];
+    expect(proField).toBe(entField);
   });
 });
 

@@ -1,4 +1,4 @@
-import { Checker, CheckResult, ParsedUrl } from "./types";
+import { Checker, CheckResult, ParsedUrl, ApiKeyTier } from "./types";
 
 class CheckerRegistry {
   private readonly checkers: Checker[] = [];
@@ -14,12 +14,19 @@ class CheckerRegistry {
   async runAll(
     url: string,
     parsed?: ParsedUrl,
+    opts?: { tier?: ApiKeyTier },
   ): Promise<{ checks: CheckResult[]; timing: Record<string, number> }> {
     const timing: Record<string, number> = {};
     const TIMEOUT_MS = 2500; // 2.5s maximum per checker
+    const tier = opts?.tier ?? "free";
+
+    const eligible = this.checkers.filter((checker) => {
+      if (!checker.minTier || checker.minTier === "free") return true;
+      return tier === "pro" || tier === "enterprise";
+    });
 
     const checks = await Promise.all(
-      this.checkers.map(async (checker) => {
+      eligible.map(async (checker) => {
         const start = Date.now();
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {

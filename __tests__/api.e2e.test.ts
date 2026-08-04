@@ -65,6 +65,8 @@ describe("API e2e", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.verdict).toBe("safe");
-    expect(mockedAnalyzeUrl).toHaveBeenCalledWith("https://example.com");
+    expect(mockedAnalyzeUrl).toHaveBeenCalledWith("https://example.com", {
+      tier: "free",
+    });
   });
 });

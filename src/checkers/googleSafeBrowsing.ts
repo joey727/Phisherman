@@ -56,4 +56,5 @@ export async function checkSafeBrowsing(url: string, _parsed?: ParsedUrl): Promi
 export const SafeBrowsingChecker: Checker = {
   name: "google_safe_browsing",
   check: checkSafeBrowsing,
+  minTier: "pro",
 };

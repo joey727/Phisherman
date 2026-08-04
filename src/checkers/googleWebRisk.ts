@@ -56,4 +56,5 @@ export async function checkGoogleWebRisk(url: string, _parsed?: ParsedUrl): Prom
 export const WebRiskChecker: Checker = {
   name: "google_web_risk",
   check: checkGoogleWebRisk,
+  minTier: "pro",
 };
