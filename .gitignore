@@ -8,3 +8,5 @@ coverage/
 ml-service/.venv/
 __pycache__/
 .pytest_cache/
+*.venv/
+*.log
