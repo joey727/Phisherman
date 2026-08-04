@@ -52,6 +52,13 @@ Hardened protections against server-side request forgery (SSRF) and DNS rebindin
 - DNS rebinding detection via parallel dual-resolution verification
 - Rejects malformed or unsafe hostnames
 
+### Machine-Learning Detection
+
+An optional XGBoost classifier runs in a separate `ml-service` (FastAPI) and adds a 41-feature signal on top of the rule-based checkers:
+- Feature vector covers URL length and entropy, hostname/digit/TLD properties, suspicious keywords, brand-impersonation patterns, and domain age.
+- The Node app calls `POST {ML_SERVICE_URL}/predict` via `src/utils/ml.ts`; results surface as `ML:` reasons. If the service is unreachable the scanner degrades to local heuristics.
+- **Trusted-apex guard:** URLs hosted on an official brand/popular apex (`TRUSTED_APEX` in `ml-service/app/features.py`) are treated as benign — brand-impersonation and suspicious-keyword features are suppressed and `predict()` short-circuits to a safe verdict. Phishing lookalikes live on *different* apexes (`paypal-secure-verify.tk`), so they are unaffected: `https://www.paypal.com/signin` scores 0 while `http://paypal-secure-verify.tk/login/account.php` scores 100.
+
 ### Caching Architecture
 
 All caching is centralized through Upstash Redis (HTTP-based), designed to minimize both key explosion and round-trip latency:
@@ -70,6 +77,7 @@ IP-based rate limiting (100 requests per 15-minute window) applied to the scan e
 ## Architecture
 
 ```
+```
 Request --> Express --> Rate Limiter --> Scanner
                                            |
                                      Parse URL once
@@ -81,11 +89,20 @@ Request --> Express --> Rate Limiter --> Scanner
                           (+ DNS)    PhishTank,      Web Risk)
                                      OpenPhish,
                                      PhishStats)
-                              |            |            |
                               +------------+------------+
-                                           |
-                                    Score Aggregation
-                                    (sum, capped 100)
+                              |            |            |
+                         Heuristics   Feed Lookups   API Checks
+                         (+ WHOIS)   (URLHaus,      (Safe Browsing,
+                          (+ DNS)    PhishTank,      Web Risk)
+                                     OpenPhish,
+                                     PhishStats)
+                              +------------+------------+
+                                            |
+                        ML checker (if ML_SERVICE_URL set:
+                        POST /predict -> ml-service)
+                                            |
+                                     Score Aggregation
+                                     (sum, capped 100)
                                            |
                                      Verdict Logic
                                   >=70: phishing
@@ -133,6 +150,12 @@ WEBRISK_API_KEY=your-key
 
 # Optional -- PhishTank custom URL
 PHISHTANK_API_URL=https://data.phishtank.com/data/online-valid.csv.gz
+
+# Optional -- ML service (enables the ML checker)
+ML_SERVICE_URL=https://ml-service.example.onrender.com
+
+# Optional -- Log scans for ML retraining feedback
+ML_FEEDBACK_ENABLED=false
 
 # Optional -- Server
 PORT=4000
@@ -221,6 +244,7 @@ Analyze a URL for phishing indicators.
 | `RATE_LIMIT_WINDOW_SECONDS` | No | 900 | Rate-limit window size |
 | `MAX_CONCURRENT_REQUESTS_PER_IP` | No | 10 | Per-worker concurrent scan cap per IP |
 | `MAX_INFLIGHT_REQUESTS` | No | 200 | Per-worker global in-flight request cap |
+| `ML_SERVICE_URL` | No | -- | Base URL of the ML service (e.g. `https://ml-service-xxxx.onrender.com`); enables the ML checker |
 | `ML_FEEDBACK_ENABLED` | No | false | Log scanned URLs to Redis `scan_log` for ML retraining feedback |
 
 ---
@@ -238,12 +262,19 @@ docker run -p 4000:4000 --env-file .env phisherman
 
 ### Render
 
-The repository includes `render.yaml` for Docker-based Render deployment:
+The repository includes `render.yaml` (a Render blueprint at the repo root) declaring **two** Docker web services:
 
-- `healthCheckPath: /health` enables HTTP readiness checks.
+| Service | Dockerfile | Health check | Notes |
+|---------|-----------|--------------|-------|
+| `phisherman` | `./Dockerfile` (Node 20) | `/health` | Main API; listens on Render's injected `$PORT` |
+| `ml-service` | `./ml-service/Dockerfile` (Python 3.12) | `/health` | FastAPI classifier; `dockerCommand` starts uvicorn on `$PORT` |
+
+Blueprint highlights:
+- `healthCheckPath: /health` enables HTTP readiness checks on both services (must listen on Render's `$PORT`, not a hardcoded port).
 - `autoDeployTrigger: checksPass` waits for GitHub CI before deploying.
 - `maxShutdownDelaySeconds: 30` gives the app time to drain during zero-downtime deploys.
-- Secrets such as Upstash, Google, and VirusTotal API keys are declared with `sync: false` and must be provided in Render.
+- Secrets (Upstash, Google, WebRisk, VirusTotal) are declared with `sync: false` and must be provided in the Render dashboard.
+- The Node service's `ML_SERVICE_URL` points at the deployed `ml-service` URL so the ML checker is wired end to end.
 
 Default Render-oriented settings use one HTTP worker (`WEB_CONCURRENCY=1`), scheduled feed refreshes, and no continuous poller or queue worker unless explicitly enabled.
 
@@ -283,11 +314,24 @@ src/
     redis.ts            # Upstash Redis client
     hashCache.ts        # Hash-based cache with per-entry TTL
     network.ts          # DNS resolution + SSRF protection
+    ml.ts               # ML checker client (calls ML_SERVICE_URL /predict)
   middleware/
     ratelimit.ts        # IP-based rate limiter
 __tests__/              # Jest test suite
+e2e/                    # End-to-end test suite (scan.e2e.ts)
 scripts/
   benchmark.ts          # Performance benchmarking script
+ml-service/             # ML classification service (FastAPI + XGBoost)
+  app/
+    main.py             # FastAPI app: /predict, /health, /ping, /invocations
+    model.py            # Model loading, inference, trusted-apex guard, fallback
+    features.py         # 41-feature extraction + TRUSTED_APEX
+    schemas.py          # Request/response models
+  training/
+    pipeline.py         # Feed ingestion, training, safe-promotion gate
+    train.py            # Shared training utilities
+  models/               # phishing_xgboost.joblib + metrics.json
+  Dockerfile
 ```
 
 ---
@@ -300,6 +344,8 @@ scripts/
 npm test
 npm run test:ci
 ```
+
+CI (`.github/workflows/ci.yml`) runs the Node build + unit tests **and** an `ml-service-test` job that installs the Python deps, loads the committed model, hits `/health` and `/predict`, then builds the ML Docker image — so a broken model or API never ships.
 
 ### End-to-End Testing
 
@@ -316,6 +362,27 @@ Requirements and caveats:
 - Only the `whois-json` library is mocked, because it is pure-ESM and Jest's CJS loader cannot import it — the WHOIS port-43 lookup itself is a network boundary, so the rest of the pipeline stays real and deterministic.
 - If `ML_SERVICE_URL` is reachable, the ML checker returns `ML:` reasons; otherwise it degrades to local heuristics. Either way the suite passes.
 - Intentionally **excluded from CI** (`npm run test:ci` / the `build-and-test` job) because it requires real Redis and network. Run it locally or add Redis secrets to CI if you want it gated there.
+
+### ML Service (ml-service)
+
+The `ml-service/` directory is a standalone FastAPI + XGBoost classifier deployed as its own Render service. The Node app calls it over HTTP when `ML_SERVICE_URL` is set.
+
+**Endpoints:**
+- `POST /predict` — `{ "url": "...", "meta": {...} }` → `{ score, label, confidence, top_features, inference_time_ms }`. Scores are 0-100; `safe`/`suspicious`/`phishing` labels use the same thresholds as the Node app.
+- `GET /health` — reports `model_loaded` status.
+- `GET /ping`, `POST /invocations` — SageMaker-compatible health/inference aliases.
+
+**Run locally:**
+```bash
+cd ml-service
+python3 -m venv .venv && source .venv/bin/activate   # needs `brew install libomp` on macOS
+pip install -r requirements.txt
+uvicorn app.main:app --port 8080
+curl -X POST localhost:8080/predict -H 'Content-Type: application/json' \
+  -d '{"url":"http://paypal-secure-verify.tk/login/account.php","meta":{}}'
+```
+
+**Model artifact:** `ml-service/models/phishing_xgboost.joblib` is committed (Dockerfile copies it in); retrain/promote via the pipeline below.
 
 ### Self-Training Data Pipeline
 
