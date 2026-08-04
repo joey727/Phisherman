@@ -77,7 +77,6 @@ IP-based rate limiting (100 requests per 15-minute window) applied to the scan e
 ## Architecture
 
 ```
-```
 Request --> Express --> Rate Limiter --> Scanner
                                            |
                                      Parse URL once
@@ -90,19 +89,12 @@ Request --> Express --> Rate Limiter --> Scanner
                                      OpenPhish,
                                      PhishStats)
                               +------------+------------+
-                              |            |            |
-                         Heuristics   Feed Lookups   API Checks
-                         (+ WHOIS)   (URLHaus,      (Safe Browsing,
-                          (+ DNS)    PhishTank,      Web Risk)
-                                     OpenPhish,
-                                     PhishStats)
-                              +------------+------------+
-                                            |
-                        ML checker (if ML_SERVICE_URL set:
-                        POST /predict -> ml-service)
-                                            |
-                                     Score Aggregation
-                                     (sum, capped 100)
+                                           |
+                      ML checker (if ML_SERVICE_URL set:
+                      POST /predict -> ml-service)
+                                           |
+                                    Score Aggregation
+                                    (sum, capped 100)
                                            |
                                      Verdict Logic
                                   >=70: phishing
