@@ -49,6 +49,7 @@ TRUSTED_APEX = BRAND_KEYWORDS | frozenset([
     "github", "wikipedia", "reddit", "stackoverflow", "mozilla", "bing",
     "bbc", "nytimes", "office", "githubusercontent", "wix", "medium",
     "wordpress", "squarespace", "gitlab", "cloudflare", "vercel", "netlify",
+    "render", "stripe", "heroku", "fly", "digitalocean", "linode",
 ])
 
 # ---------------------------------------------------------------------------

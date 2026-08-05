@@ -26,8 +26,14 @@ logger = logging.getLogger(__name__)
 _model = None
 _model_loaded = False
 
+# Probability thresholds mapped to 0-100 scores (kept in sync with the
+# training pipeline's calibration; see training/pipeline.py).
+SUSPICIOUS_SCORE_THRESHOLD = 40
+PHISHING_SCORE_THRESHOLD = 70
+
 # Path priority: MODEL_PATH env > default local path
-DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "phishing_xgboost.joblib"
+DEFAULT_MODEL_PATH = Path(__file__).resolve(
+).parent.parent / "models" / "phishing_xgboost.joblib"
 
 
 def get_model_path() -> Path:
@@ -47,7 +53,8 @@ def load_model() -> bool:
 
     model_path = get_model_path()
     if not model_path.exists():
-        logger.warning(f"Model file not found at {model_path}. Using fallback scoring.")
+        logger.warning(
+            f"Model file not found at {model_path}. Using fallback scoring.")
         _model_loaded = False
         return False
 
@@ -160,9 +167,36 @@ def _fallback_score(features: np.ndarray) -> tuple[float, float, list[str]]:
     return score, confidence, reasons
 
 
+def _get_top_features(features: np.ndarray, top_k: int = 5) -> list[str]:
+    """
+    Return the top-k contributing features based on feature importance
+    weighted by feature value.
+    """
+    if _model is None:
+        return []
+
+    try:
+        # XGBoost exposes feature_importances_ on the classifier
+        model = _model
+        if hasattr(model, "named_steps"):
+            # It's a sklearn Pipeline — get the classifier step
+            model = model.named_steps.get("classifier", model)
+
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            # Weight by actual feature values (non-zero features that matter)
+            weighted = importances * np.abs(features)
+            top_indices = np.argsort(weighted)[::-1][:top_k]
+            return [FEATURE_NAMES[i] for i in top_indices if weighted[i] > 0]
+    except Exception as e:
+        logger.warning(f"Could not extract feature importances: {e}")
+
+    return []
+
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def predict(url: str, meta: Optional[dict] = None) -> dict:
     """
@@ -191,7 +225,8 @@ def predict(url: str, meta: Optional[dict] = None) -> dict:
 
             # Get probability predictions
             proba = _model.predict_proba(X)[0]
-            phishing_prob = float(proba[1]) if len(proba) > 1 else float(proba[0])
+            phishing_prob = float(proba[1]) if len(
+                proba) > 1 else float(proba[0])
 
             score = int(round(phishing_prob * 100))
             confidence = float(phishing_prob)
@@ -206,9 +241,9 @@ def predict(url: str, meta: Optional[dict] = None) -> dict:
         score, confidence, top_features = _fallback_score(features)
 
     # Determine label
-    if score >= 70:
+    if score >= PHISHING_SCORE_THRESHOLD:
         label = "phishing"
-    elif score >= 40:
+    elif score >= SUSPICIOUS_SCORE_THRESHOLD:
         label = "suspicious"
     else:
         label = "safe"
@@ -222,30 +257,3 @@ def predict(url: str, meta: Optional[dict] = None) -> dict:
         "top_features": top_features if isinstance(top_features, list) else list(top_features),
         "inference_time_ms": round(elapsed_ms, 2),
     }
-
-
-def _get_top_features(features: np.ndarray, top_k: int = 5) -> list[str]:
-    """
-    Return the top-k contributing features based on feature importance
-    weighted by feature value.
-    """
-    if _model is None:
-        return []
-
-    try:
-        # XGBoost exposes feature_importances_ on the classifier
-        model = _model
-        if hasattr(model, "named_steps"):
-            # It's a sklearn Pipeline — get the classifier step
-            model = model.named_steps.get("classifier", model)
-
-        if hasattr(model, "feature_importances_"):
-            importances = model.feature_importances_
-            # Weight by actual feature values (non-zero features that matter)
-            weighted = importances * np.abs(features)
-            top_indices = np.argsort(weighted)[::-1][:top_k]
-            return [FEATURE_NAMES[i] for i in top_indices if weighted[i] > 0]
-    except Exception as e:
-        logger.warning(f"Could not extract feature importances: {e}")
-
-    return []
