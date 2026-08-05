@@ -395,17 +395,12 @@ def fetch_scan_log() -> list:
 # Benchmark + safe promotion
 # ---------------------------------------------------------------------------
 
-def evaluate_benchmark(model) -> dict:
-    urls = BENCHMARK_PHISHING + BENCHMARK_BENIGN
-    labels = [1] * len(BENCHMARK_PHISHING) + [0] * len(BENCHMARK_BENIGN)
-    # Trusted-apex guard mirrors app/model.predict: official brand apex => safe.
-    pred = []
-    for u in urls:
-        if is_trusted_apex(u):
-            pred.append(0)
-        else:
-            X = extract_features(u, {}).reshape(1, -1)
-            pred.append(int(model.predict_proba(X)[0, 1] >= 0.5))
+SUSPICIOUS_THRESHOLD = 0.40
+PHISHING_THRESHOLD = 0.70
+MIN_RAW_PHISHING_RECALL = 0.90
+
+
+def _metrics_from_predictions(pred: list[int], labels: list[int]) -> dict:
     tp = sum(1 for p, l in zip(pred, labels) if p == 1 and l == 1)
     fp = sum(1 for p, l in zip(pred, labels) if p == 1 and l == 0)
     fn = sum(1 for p, l in zip(pred, labels) if p == 0 and l == 1)
@@ -413,14 +408,61 @@ def evaluate_benchmark(model) -> dict:
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    false_positive_rate = fp / (fp + tn) if (fp + tn) else 0.0
+    false_negative_rate = fn / (fn + tp) if (fn + tp) else 0.0
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "false_positive_rate": round(false_positive_rate, 4),
+        "false_negative_rate": round(false_negative_rate, 4),
+        "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+    }
+
+
+def _raw_probability(model, url: str) -> float:
+    X = extract_features(url, {}).reshape(1, -1)
+    return float(model.predict_proba(X)[0, 1])
+
+
+def evaluate_benchmark(model) -> dict:
+    urls = BENCHMARK_PHISHING + BENCHMARK_BENIGN
+    labels = [1] * len(BENCHMARK_PHISHING) + [0] * len(BENCHMARK_BENIGN)
+    raw_probs = [_raw_probability(model, u) for u in urls]
+    raw_pred = [int(p >= PHISHING_THRESHOLD) for p in raw_probs]
+    guarded_pred = []
+    for u in urls:
+        if is_trusted_apex(u):
+            guarded_pred.append(0)
+        else:
+            guarded_pred.append(int(_raw_probability(model, u) >= PHISHING_THRESHOLD))
+
+    raw = _metrics_from_predictions(raw_pred, labels)
+    guarded = _metrics_from_predictions(guarded_pred, labels)
+    guarded_regression_fp = sum(
+        1 for u in RAW_MODEL_BENIGN_REGRESSION
+        if not is_trusted_apex(u) and _raw_probability(model, u) >= PHISHING_THRESHOLD
+    )
+    unguarded_scores = {
+        u: round(_raw_probability(model, u), 4) for u in RAW_UNGUARDED_BENIGN_REGRESSION
+    }
+    unguarded_fp = sum(1 for p in unguarded_scores.values() if p >= PHISHING_THRESHOLD)
     return {
         "benchmark_n": len(labels),
         "benchmark_phishing": len(BENCHMARK_PHISHING),
         "benchmark_benign": len(BENCHMARK_BENIGN),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+        "thresholds": {
+            "suspicious": SUSPICIOUS_THRESHOLD,
+            "phishing": PHISHING_THRESHOLD,
+        },
+        "raw": raw,
+        "guarded": guarded,
+        "raw_benign_regression_scores": {
+            u: round(_raw_probability(model, u), 4) for u in RAW_MODEL_BENIGN_REGRESSION
+        },
+        "guarded_regression_fp": guarded_regression_fp,
+        "raw_unguarded_benign_scores": unguarded_scores,
+        "raw_unguarded_benign_fp": unguarded_fp,
     }
 
 
@@ -527,31 +569,47 @@ def run(small: bool = False) -> bool:
     benchmark = evaluate_benchmark(model)
 
     last = load_metrics()
-    prev_f1 = last.get("benchmark", {}).get("f1")
-    new_f1 = benchmark["f1"]
+    prev_f1 = (
+        last.get("benchmark", {}).get("guarded", {}).get("f1")
+        or last.get("benchmark", {}).get("f1")
+    )
+    new_f1 = benchmark["guarded"]["f1"]
+    gates = {
+        "guarded_benign_fp_ok": (
+            benchmark["guarded"]["fp"] == 0
+            and benchmark["guarded_regression_fp"] == 0
+        ),
+        "raw_unguarded_benign_ok": benchmark["raw_unguarded_benign_fp"] == 0,
+        "raw_phishing_recall_ok": benchmark["raw"]["recall"] >= MIN_RAW_PHISHING_RECALL,
+        "f1_not_regressed": prev_f1 is None or new_f1 >= prev_f1,
+    }
 
     metrics = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "model_file": MODEL_PATH.name,
         "training": holdout,
         "benchmark": benchmark,
+        "promotion_gates": gates,
         "was_better_than": prev_f1,
         "data": sources,
     }
 
-    if prev_f1 is None or new_f1 >= prev_f1:
+    if all(gates.values()):
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         joblib.dump(model, MODEL_PATH, compress=3)
         save_metrics(metrics)
         logger.info(
-            "PROMOTED model (benchmark F1 %.3f, previous %s)",
+            "PROMOTED model (guarded benchmark F1 %.3f, previous %s)",
             new_f1,
             "n/a" if prev_f1 is None else f"{prev_f1:.3f}",
         )
         return True
 
     logger.info(
-        "Kept current model: new benchmark F1 %.3f < previous %.3f", new_f1, prev_f1
+        "Kept current model: guarded benchmark F1 %.3f, previous %s, gates=%s",
+        new_f1,
+        "n/a" if prev_f1 is None else f"{prev_f1:.3f}",
+        gates,
     )
     return False
 
