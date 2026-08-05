@@ -1,34 +1,84 @@
 {
-  "trained_at": "2026-08-03T22:52:07.205230+00:00",
+  "trained_at": "2026-08-05T11:57:25.579679+00:00",
   "model_file": "phishing_xgboost.joblib",
   "training": {
-    "precision": 0.9973309608540926,
-    "recall": 0.9964444444444445,
-    "f1": 0.9968875055580257,
-    "accuracy": 0.9968888888888889,
-    "training_n": 30000,
-    "validation_n": 4500,
-    "pos_rate_train": 0.5
+    "precision": 0.9968368730230457,
+    "recall": 0.9804444444444445,
+    "f1": 0.9885727089401748,
+    "accuracy": 0.988664147588353,
+    "training_n": 29990,
+    "validation_n": 4499,
+    "pos_rate_train": 0.5001667222407469
   },
   "benchmark": {
-    "benchmark_n": 28,
-    "benchmark_phishing": 14,
-    "benchmark_benign": 14,
-    "precision": 0.8235,
-    "recall": 1.0,
-    "f1": 0.9032,
-    "tp": 14,
-    "fp": 3,
-    "tn": 11,
-    "fn": 0
+    "benchmark_n": 42,
+    "benchmark_phishing": 19,
+    "benchmark_benign": 23,
+    "thresholds": {
+      "suspicious": 0.4,
+      "phishing": 0.7
+    },
+    "raw": {
+      "precision": 0.9048,
+      "recall": 1.0,
+      "f1": 0.95,
+      "false_positive_rate": 0.087,
+      "false_negative_rate": 0.0,
+      "tp": 19,
+      "fp": 2,
+      "tn": 21,
+      "fn": 0
+    },
+    "guarded": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_positive_rate": 0.0,
+      "false_negative_rate": 0.0,
+      "tp": 19,
+      "fp": 0,
+      "tn": 23,
+      "fn": 0
+    },
+    "raw_benign_regression_scores": {
+      "https://render.com/": 0.9193,
+      "https://dashboard.render.com/": 0.9253,
+      "https://dashboard.stripe.com/login": 0.202,
+      "https://docs.github.com/en/actions": 0.0189,
+      "https://www.npmjs.com/package/react": 0.0033,
+      "https://pypi.org/project/requests/": 0.0027,
+      "https://www.cloudflare.com/products/": 0.0787,
+      "https://app.netlify.com/sites": 0.0921,
+      "https://vercel.com/dashboard": 0.8479
+    },
+    "guarded_regression_fp": 0,
+    "raw_unguarded_benign_scores": {
+      "https://www.npmjs.com/package/react": 0.0033,
+      "https://pypi.org/project/requests/": 0.0027,
+      "https://www.python.org/downloads/": 0.0279,
+      "https://docs.docker.com/get-started/": 0.0331,
+      "https://kubernetes.io/docs/home/": 0.0503,
+      "https://www.postgresql.org/docs/": 0.1469,
+      "https://getbootstrap.com/docs/": 0.0737,
+      "https://www.w3.org/TR/html/": 0.0021,
+      "https://archive.org/details/": 0.1358,
+      "https://webpack.js.org/concepts/": 0.0711
+    },
+    "raw_unguarded_benign_fp": 0
   },
-  "was_better_than": 0.7,
+  "promotion_gates": {
+    "guarded_benign_fp_ok": true,
+    "raw_unguarded_benign_ok": true,
+    "raw_phishing_recall_ok": true,
+    "f1_not_regressed": true
+  },
+  "was_better_than": 0.9032,
   "data": {
-    "feed_positives": 85557,
+    "feed_positives": 86126,
     "delayed_positives": 0,
     "delayed_negatives": 0,
-    "benign_pool": 42974,
+    "benign_pool": 14990,
     "train_positives": 15000,
-    "train_negatives": 15000
+    "train_negatives": 14990
   }
 }
