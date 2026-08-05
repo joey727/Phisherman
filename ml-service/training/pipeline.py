@@ -17,7 +17,9 @@ Usage:
     python -m training.pipeline --small    # quick smoke run
 
 Optional env: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
-(needed only to read the delayed-feedback scan_log).
+(needed only to read the delayed-feedback scan_log). These are auto-loaded
+from the repo-root or ml-service `.env` file (gitignored) if not already
+present in the environment; an exported env or CI/Render injection always wins.
 """
 
 import gzip
@@ -35,6 +37,7 @@ from pathlib import Path
 import httpx
 import joblib
 import numpy as np
+from dotenv import load_dotenv
 
 # Allow `python -m training.pipeline` to import the sibling `app` package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -54,6 +57,11 @@ MODELS_DIR = ROOT / "models"
 MODEL_PATH = MODELS_DIR / "phishing_xgboost.joblib"
 METRICS_PATH = MODELS_DIR / "metrics.json"
 SCAN_LOG_KEY = "scan_log"
+
+# Load repo-root / ml-service `.env` (gitignored) so local retrains pick up
+# UPSTASH_REDIS_REST_URL/TOKEN. python-dotenv leaves existing env vars
+# untouched by default, so CI/Render/exported values always win.
+load_dotenv()
 
 USER_AGENT = "Phisherman-ml-pipeline/1.0"
 HTTP_TIMEOUT = httpx.Timeout(60.0)
@@ -288,8 +296,17 @@ def fetch_tranco(top_n: int = 40000) -> list:
 def fetch_scan_log() -> list:
     url = os.environ.get("UPSTASH_REDIS_REST_URL")
     token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    if not url or not token:
-        logger.info("UPSTASH_REDIS_REST_URL/TOKEN not set — skipping scan_log")
+    missing = [name for name, value in (
+        ("UPSTASH_REDIS_REST_URL", url),
+        ("UPSTASH_REDIS_REST_TOKEN", token),
+    ) if not value]
+    if missing:
+        logger.info(
+            "Redis scan_log skipped: %s not set in environment "
+            "(feed-only training; export them or run in the CI retrain job to "
+            "include delayed-feedback samples)",
+            ", ".join(missing),
+        )
         return []
     r = httpx.get(
         f"{url}/zrange/{SCAN_LOG_KEY}/0/-1",
