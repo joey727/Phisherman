@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import readline from "node:readline";
 import redis from "../utils/redis";
 import { Checker, CheckResult, ParsedUrl } from "../types";
+import { isTrustedApex } from "../utils/trustedApex";
 
 const FEED = "https://openphish.com/feed.txt";
 const REDIS_KEY_URLS = "openphish_urls";
@@ -97,17 +98,23 @@ export async function checkOpenPhish(url: string, parsed?: ParsedUrl): Promise<C
 
     // Check Hostname -- use pre-parsed if available
     const hostname = parsed?.hostname;
-    if (hostname) {
-      const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, hostname);
+    const hostNames = hostname
+      ? [hostname]
+      : (() => {
+          try {
+            const u = new URL(url.startsWith("http") ? url : `http://${url}`);
+            return [u.hostname];
+          } catch {
+            return [];
+          }
+        })();
+
+    for (const h of hostNames) {
+      // Skip host-level match on trusted official apexes (exact URL match above
+      // still catches real phishing on those apexes).
+      if (isTrustedApex(h)) continue;
+      const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, h);
       if (hostMatch) return { score: 80, reason: "Domain listed in OpenPhish intelligence" };
-    } else {
-      try {
-        const u = new URL(url.startsWith("http") ? url : `http://${url}`);
-        const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, u.hostname);
-        if (hostMatch) return { score: 80, reason: "Domain listed in OpenPhish intelligence" };
-      } catch {
-        // ignore parse errors
-      }
     }
   } catch (err) {
     console.error("OpenPhish check error:", err);

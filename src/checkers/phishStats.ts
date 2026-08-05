@@ -2,13 +2,22 @@ import axios from "axios";
 import { URL } from "node:url";
 import redis from "../utils/redis";
 import { Checker, CheckResult, ParsedUrl } from "../types";
+import { isTrustedApex } from "../utils/trustedApex";
 
-const FEED = "https://api.phishstats.info/api/phishing?_sort=-id&_size=20000"; // Fetch last 20k entries
+// The API caps `_size` at 100 rows per request and ignores any larger value,
+// so the feed must be fetched with `_p` pagination. `_sort=-id` returns the
+// newest first. Docs: https://phishstats.info/api-docs
+const BASE = "https://api.phishstats.info/api/phishing";
 const REDIS_KEY_URLS = "phishstats_urls";
 const REDIS_KEY_HOSTS = "phishstats_hosts";
 const REDIS_KEY_LAST_UPDATE = "phishstats_last_update";
 
 export async function loadPhishStats() {
+    // Anonymous access is limited to 50 requests/day/IP; a psk_* key raises the
+    // quota. We refresh roughly every 90 minutes (~16x/day), so the per-refresh
+    // page budget keeps daily usage within the anonymous limit unless a key is set.
+    const apiKey = process.env.PHISHSTATS_API_KEY || "";
+    const maxPages = Number(process.env.PHISHSTATS_MAX_PAGES) || (apiKey ? 10 : 3);
     try {
         const lastUpdate = await redis.get(REDIS_KEY_LAST_UPDATE);
         const cacheExpired = !lastUpdate || (Date.now() - Number(lastUpdate) > 90 * 60 * 1000); // 90 mins
@@ -16,14 +25,28 @@ export async function loadPhishStats() {
         if (cacheExpired) {
             console.log("PhishStats cache expired or missing. Refreshing Redis...");
             // Add heavy user-agent to avoid blind blocking
-            const response = await axios.get(FEED, {
-                timeout: 45000,
-                headers: { "User-Agent": "Phisherman/1.0" }
-            });
+            const headers: Record<string, string> = { "User-Agent": "Phisherman/1.0" };
+            if (apiKey) headers["X-API-Key"] = apiKey;
 
-            const entries = response.data;
-            if (!Array.isArray(entries)) {
-                console.warn("PhishStats API returned non-array data");
+            const entries: Array<{ id: number; url?: string }> = [];
+            for (let page = 1; page <= maxPages; page++) {
+                const res = await axios.get(
+                    `${BASE}?_sort=-id&_size=100&_p=${page}`,
+                    { timeout: 45000, headers },
+                );
+                const rows = res.data;
+                if (!Array.isArray(rows)) {
+                    console.warn("PhishStats API returned non-array data");
+                    break;
+                }
+                entries.push(...rows);
+                // Newest-first pages fill up with 100 rows until the feed ends.
+                if (rows.length < 100) break;
+                await new Promise(resolve => setImmediate(resolve));
+            }
+
+            if (entries.length === 0) {
+                console.warn("PhishStats feed returned 0 entries; keeping previous cache.");
                 return;
             }
 
@@ -37,7 +60,6 @@ export async function loadPhishStats() {
             const hostBatch: string[] = [];
 
             for (const entry of entries) {
-                // Entry format: { id, url, ip, ... }
                 if (!entry.url) continue;
 
                 const rawUrl = entry.url.trim();
@@ -52,7 +74,6 @@ export async function loadPhishStats() {
                 if (urlBatch.length >= 1000) {
                     await (redis.sadd as any)(tempUrlsKey, ...urlBatch);
                     urlBatch.length = 0;
-                    // Yield to event loop to keep server responsive
                     await new Promise(resolve => setImmediate(resolve));
                 }
                 if (hostBatch.length >= 1000) {
@@ -69,13 +90,16 @@ export async function loadPhishStats() {
                 await (redis as any).rename(tempUrlsKey, REDIS_KEY_URLS);
                 await (redis as any).rename(tempHostsKey, REDIS_KEY_HOSTS);
             } catch (err) {
-                console.warn("PhishStats rename failed, likely empty feed data.");
+                console.warn("PhishStats rename failed, likely empty feed data.", err);
+                return;
             }
 
             await redis.set(REDIS_KEY_LAST_UPDATE, Date.now().toString());
             console.log(`PhishStats Redis cache updated with ${entries.length} entries.`);
         }
     } catch (err) {
+        // Non-2xx (e.g. 429 rate limit) or network errors: keep the previously
+        // cached data and log. Never discard valid data on a failed refresh.
         console.error("PhishStats refresh error:", err);
     }
 }
@@ -87,17 +111,23 @@ export async function checkPhishStats(url: string, parsed?: ParsedUrl): Promise<
 
         // Use pre-parsed hostname if available
         const hostname = parsed?.hostname;
-        if (hostname) {
-            const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, hostname);
+        const hostNames = hostname
+            ? [hostname]
+            : (() => {
+                try {
+                    const u = new URL(url.startsWith("http") ? url : `http://${url}`);
+                    return [u.hostname];
+                } catch {
+                    return [];
+                }
+            })();
+
+        for (const h of hostNames) {
+            // Skip host-level match on trusted official apexes (the exact URL
+            // match above still catches real phishing on those apexes).
+            if (isTrustedApex(h)) continue;
+            const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, h);
             if (hostMatch) return { score: 80, reason: "Domain listed in PhishStats intelligence" };
-        } else {
-            try {
-                const u = new URL(url.startsWith("http") ? url : `http://${url}`);
-                const hostMatch = await redis.sismember(REDIS_KEY_HOSTS, u.hostname);
-                if (hostMatch) return { score: 80, reason: "Domain listed in PhishStats intelligence" };
-            } catch {
-                // ignore
-            }
         }
     } catch (err) {
         console.error("PhishStats check error:", err);

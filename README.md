@@ -247,6 +247,8 @@ Analyze a URL for phishing indicators.
 | `VT_RATE_LIMIT` | No | 4 | VirusTotal requests per minute per API process |
 | `ML_SERVICE_URL` | No | -- | Optional FastAPI ML inference service URL |
 | `PHISHTANK_API_URL` | No | CSV.GZ feed | Custom PhishTank data URL |
+| `PHISHSTATS_API_KEY` | No | -- | Optional PhishStats `psk_*` API key; sent as `X-API-Key` to lift the anonymous 50 req/day/IP quota |
+| `PHISHSTATS_MAX_PAGES` | No | 3 (or 10 with key) | Max feed pages (100 rows each) fetched per PhishStats refresh, bounded to respect API rate limits |
 | `PORT` | No | 4000 | Server listen port |
 | `SCAN_CACHE_SAFE_RESULTS` | No | false | Cache scan results with "safe" verdict |
 | `WEB_CONCURRENCY` | No | 1 | Number of HTTP worker processes |
