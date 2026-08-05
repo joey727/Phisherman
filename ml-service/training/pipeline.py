@@ -47,6 +47,7 @@ from app.model import is_trusted_apex  # noqa: E402
 from training.train import (  # noqa: E402
     train_on_dataset,
     generate_benign,
+    generate_benign_docs,
     generate_phishing,
 )
 
@@ -82,6 +83,11 @@ BENCHMARK_PHISHING = [
     "https://login-nil-verify.urrer.co/confirm",
     "https://coinbase-secure-panel.pw/wallet",
     "http://www.chase.com-otp-verify/login",
+    "http://render-secure-verify.tk/login",
+    "https://dashboard-render-account.xyz/signin",
+    "https://stripe-billing-verify.top/account",
+    "https://login.heroku.secure-panel.pw/oauth/confirm",
+    "https://cloudflare-support.verify-account.icu/billing",
 ]
 
 BENCHMARK_BENIGN = [
@@ -99,6 +105,57 @@ BENCHMARK_BENIGN = [
     "https://calendar.google.com/calendar/r",
     "https://open.spotify.com/track/111",
     "https://cloud.google.com/compute",
+    "https://dashboard.render.com/",
+    "https://dashboard.stripe.com/login",
+    "https://cloud.digitalocean.com/projects",
+    "https://docs.github.com/en/actions",
+    "https://www.npmjs.com/package/react",
+    "https://pypi.org/project/requests/",
+    "https://www.cloudflare.com/products/",
+    "https://app.netlify.com/sites",
+    "https://vercel.com/dashboard",
+]
+
+RAW_MODEL_BENIGN_REGRESSION = [
+    "https://render.com/",
+    "https://dashboard.render.com/",
+    "https://dashboard.stripe.com/login",
+    "https://docs.github.com/en/actions",
+    "https://www.npmjs.com/package/react",
+    "https://pypi.org/project/requests/",
+    "https://www.cloudflare.com/products/",
+    "https://app.netlify.com/sites",
+    "https://vercel.com/dashboard",
+]
+
+# Real benign URLs whose apex is NOT in TRUSTED_APEX, so the trusted-apex guard
+# does NOT save them. These must be classified as benign by the *raw* model —
+# they are the proof that the classifier generalizes to unfamiliar benign
+# shapes instead of relying on an allowlist.
+RAW_UNGUARDED_BENIGN_REGRESSION = [
+    "https://www.npmjs.com/package/react",
+    "https://pypi.org/project/requests/",
+    "https://www.python.org/downloads/",
+    "https://docs.docker.com/get-started/",
+    "https://kubernetes.io/docs/home/",
+    "https://www.postgresql.org/docs/",
+    "https://getbootstrap.com/docs/",
+    "https://www.w3.org/TR/html/",
+    "https://archive.org/details/",
+    "https://webpack.js.org/concepts/",
+]
+
+HARD_NEGATIVE_PHISHING = [
+    "http://render-secure-verify.tk/login",
+    "https://dashboard-render-account.xyz/signin",
+    "https://stripe-billing-verify.top/account",
+    "https://login.heroku.secure-panel.pw/oauth/confirm",
+    "https://cloudflare-support.verify-account.icu/billing",
+    "http://github-security-alert.gq/login",
+    "https://npmjs-package-verify.top/account",
+    "https://pypi-support-update.xyz/project/requests",
+    "https://vercel-secure-panel.pw/dashboard",
+    "https://netlify-account-confirm.icu/sites",
 ]
 
 # Real trusted domains added to the *negative* training set (distinct from the
@@ -150,6 +207,12 @@ CURATED_BENIGN = [
     "https://yahoo.com",
     "https://www.office.com",
     "https://www.bankofamerica.com",
+    "https://render.com",
+    "https://stripe.com",
+    "https://www.heroku.com",
+    "https://fly.io",
+    "https://www.digitalocean.com",
+    "https://www.linode.com",
 ]
 
 # Representative *real-path* benign URLs (subdomains + paths) added to the
@@ -191,6 +254,17 @@ CURATED_BENIGN_PATHS = [
     "https://chaseonline.chase.com/",
     "https://secure.bankofamerica.com/login/",
     "https://www.usbank.com/online-savings.html",
+    "https://dashboard.render.com/",
+    "https://dashboard.stripe.com/login",
+    "https://dashboard.heroku.com/apps",
+    "https://fly.io/user/personal_access_tokens",
+    "https://cloud.digitalocean.com/projects",
+    "https://app.netlify.com/sites",
+    "https://vercel.com/dashboard",
+    "https://docs.github.com/en/actions",
+    "https://www.npmjs.com/package/react",
+    "https://pypi.org/project/requests/",
+    "https://www.cloudflare.com/products/",
 ]
 
 
@@ -387,19 +461,33 @@ def build_dataset(small: bool):
     delayed_pos = [u for u in scan_log if u in pos_set]
     delayed_neg = [u for u in scan_log if u not in pos_set]
 
-    benign = _safe(fetch_tranco, [])
-    if not benign:
-        benign = generate_benign(max_neg * 3)
-    # Include curated trusted-domains (distinct from the benchmark set) plus
-    # representative real-path benign URLs, excluding anything from the feed.
-    benign = _dedupe(CURATED_BENIGN + CURATED_BENIGN_PATHS + benign + generate_benign(max_neg // 4))
-    benign = [u for u in benign if u not in pos_set]
+    tranco = _safe(fetch_tranco, [])
+    if not tranco:
+        tranco = generate_benign(max_neg * 3)
 
-    positives = _dedupe(pos_feed + delayed_pos)
-    if not positives:
-        positives = generate_phishing(max_pos * 3)
-    negatives = benign + delayed_neg
-    negatives = negatives[:max_neg] if len(negatives) >= max_neg else negatives
+    # Structural negatives: curated real-path URLs plus synthetic path/subdomain
+    # benign URLs. Kept in full so the model sees benign URLs that have paths and
+    # subdomains — padding with bare-apex Tranco alone taught it "path = phishing".
+    structural_benign = _dedupe(
+        CURATED_BENIGN
+        + CURATED_BENIGN_PATHS
+        + generate_benign(max_neg // 4)
+        + generate_benign_docs(max_neg // 4)
+    )
+    structural_benign = [u for u in structural_benign if u not in pos_set]
+
+    # Pad the remainder with broad real-world apex domains (Tranco).
+    tranco = [u for u in _dedupe(tranco) if u not in pos_set]
+    pad_needed = max_neg - len(structural_benign)
+    if pad_needed > 0:
+        benign = _dedupe(structural_benign + tranco[:pad_needed])
+    else:
+        benign = structural_benign[:max_neg]
+    negatives = _dedupe(benign + delayed_neg)[:max_neg]
+
+    positives = _dedupe(HARD_NEGATIVE_PHISHING + pos_feed + delayed_pos)
+    if not pos_feed and not delayed_pos:
+        positives = _dedupe(positives + generate_phishing(max_pos * 3))
 
     random.seed(42)
     random.shuffle(positives)

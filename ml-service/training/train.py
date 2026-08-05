@@ -64,6 +64,14 @@ PHISHING_PATTERNS = [
     "http://{rand}.top/~admin/secure/{brand}/verify",
     "https://{rand}.buzz/{long_path}/credential.php",
     "http://{rand}.pw/account/unlock?ref={long_rand}",
+    "http://{platform}-secure-verify.{tld}/login",
+    "https://dashboard-{platform}-account.{tld}/signin",
+    "http://{platform}.{rand}.{tld}/account/update",
+    "https://login.{platform}.{rand}.{tld}/oauth/confirm",
+    "https://{brand}-support.{rand}.{tld}/{platform}/billing",
+    "https://{brand}-account.{rand}.com/signin",
+    "https://login-{rand}-verify.{rand}.co/confirm",
+    "https://xn--{rand}.com-account-verify/signin",
 ]
 
 BENIGN_PATTERNS = [
@@ -92,10 +100,24 @@ BENIGN_PATTERNS = [
     "https://www.npmjs.com/package/{name}",
     "https://pypi.org/project/{name}",
     "https://www.cloudflare.com/{path}",
+    "https://dashboard.{platform}.com/{path}",
+    "https://console.{platform}.com/{path}",
+    "https://app.{platform}.com/{path}",
+    "https://docs.{platform}.com/{path}",
+    "https://support.{platform}.com/{path}",
+    "https://cloud.{platform}.com/{path}",
+    "https://{platform}.com/{path}",
+    "https://www.{platform}.com/{path}",
+    "https://{platform}.com/login",
+    "https://{platform}.com/account/{path}",
 ]
 
 BRANDS = ["paypal", "apple", "google", "microsoft", "amazon", "netflix",
           "facebook", "chase", "wellsfargo", "dropbox", "linkedin", "ebay"]
+PLATFORMS = [
+    "render", "stripe", "heroku", "fly", "digitalocean", "linode",
+    "github", "npmjs", "pypi", "cloudflare", "vercel", "netlify",
+]
 SUSPICIOUS_TLDS = ["tk", "ml", "cf", "ga", "gq", "top", "xyz", "buzz", "pw", "cc", "su"]
 SAFE_TLDS = ["com", "org", "net", "io", "dev", "co", "edu", "gov"]
 
@@ -118,6 +140,7 @@ def _generate_url(pattern: str, is_phishing: bool) -> str:
         "{rand}": _rand_str(random.randint(5, 15)),
         "{long_rand}": _rand_hex(32),
         "{brand}": brand,
+        "{platform}": random.choice(PLATFORMS),
         "{tld}": random.choice(tld_pool),
         "{path}": "/".join(_rand_str(random.randint(3, 8)) for _ in range(random.randint(1, 4))),
         "{long_path}": "/".join(_rand_str(random.randint(4, 10)) for _ in range(random.randint(4, 8))),
@@ -208,6 +231,47 @@ def generate_benign(n: int) -> list[str]:
         _generate_url(random.choice(BENIGN_PATTERNS), is_phishing=False)
         for _ in range(n)
     ]
+
+
+# Common words seen in real-world benign doc/blog/support paths. Used by
+# generate_benign_docs to teach the model that word-based deep paths on
+# legitimate-looking domains (docs, manuals, blog posts) are benign, rather than
+# the alphanumeric random paths produced by BENIGN_PATTERNS.
+DOC_PATH_WORDS = [
+    "docs", "home", "getting-started", "user-guide", "api", "reference",
+    "tutorials", "blog", "news", "products", "pricing", "about", "contact",
+    "privacy", "terms", "downloads", "releases", "faq", "help", "support",
+    "manual", "guide", "intro", "handbook", "install", "core", "ui",
+    "components", "themes", "plugins", "integrations", "enterprise",
+    "community", "solutions", "resources", "documentation",
+]
+
+DOC_TLDS = ["io", "org", "com", "dev", "net", "co"]
+
+
+def generate_benign_docs(n: int) -> list[str]:
+    """Generate n synthetic benign URLs shaped like real doc/blog/support pages.
+
+    Uses realistic word paths and domains of varied lengths (including short
+    domains and short digit-bearing domains) so the classifier learns the class
+    "word-path on a legitimate-looking domain" instead of over-relying on the
+    trusted-apex allowlist.
+    """
+    out = []
+    for _ in range(n):
+        n_chars = random.choice([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+        if n_chars <= 4 and random.random() < 0.5:
+            domain = random.choice("abcdefghijklmnopqrstuvwxyz") + str(random.randint(0, 9))
+        else:
+            domain = "".join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(n_chars))
+        if random.random() < 0.4:
+            domain = "www." + domain
+        suffix = random.choice(DOC_TLDS)
+        n_segments = random.randint(1, 4)
+        segments = [random.choice(DOC_PATH_WORDS) for _ in range(n_segments)]
+        path = "/" + "/".join(segments) + "/"
+        out.append(f"https://{domain}.{suffix}{path}")
+    return out
 
 
 def generate_phishing(n: int) -> list[str]:
