@@ -72,6 +72,31 @@ jobs:
               assert resp.status_code == 200, resp.text
               body = resp.json()
               assert "score" in body and "label" in body and "top_features" in body, body
+              assert body["label"] in {"suspicious", "phishing"}, body
+
+              for url in ("https://render.com/", "https://dashboard.render.com/"):
+                  resp = client.post("/predict", json={"url": url, "meta": {}})
+                  assert resp.status_code == 200, resp.text
+                  body = resp.json()
+                  assert body["label"] == "safe", body
+                  assert body["score"] == 0, body
+
+              # Unguarded benign URLs (apex NOT in the trusted allowlist) must be
+              # classified safely by the raw model itself — not by the guard.
+              for url in (
+                  "https://www.npmjs.com/package/react",
+                  "https://pypi.org/project/requests/",
+                  "https://docs.docker.com/get-started/",
+              ):
+                  resp = client.post("/predict", json={"url": url, "meta": {}})
+                  assert resp.status_code == 200, resp.text
+                  body = resp.json()
+                  assert body["label"] != "phishing", body
+
+              resp = client.post("/predict", json={"url": "http://render-secure-verify.tk/login", "meta": {}})
+              assert resp.status_code == 200, resp.text
+              body = resp.json()
+              assert body["label"] in {"suspicious", "phishing"}, body
 
           print("ml-service smoke test passed")
           EOF
