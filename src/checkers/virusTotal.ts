@@ -151,4 +151,5 @@ export async function checkVirusTotal(
 export const VirusTotalChecker: Checker = {
   name: "virustotal",
   check: checkVirusTotal,
+  minTier: "pro",
 };

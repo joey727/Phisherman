@@ -14,6 +14,7 @@ export interface ParsedUrl {
 export interface Checker {
     name: string;
     check: (url: string, parsed?: ParsedUrl) => Promise<CheckResult>;
+    minTier?: "free" | "pro";
 }
 
 export interface ScanResult {
@@ -24,6 +25,7 @@ export interface ScanResult {
     reasons: string[];
     mlConfidence?: number;
     executionTimeMs?: Record<string, number>;
+    tier: ApiKeyTier;
 }
 
 export type ApiKeyTier = "free" | "pro" | "enterprise";
@@ -39,9 +41,9 @@ export interface ApiKeyMetadata {
 }
 
 export const TIER_CONFIGS: Record<ApiKeyTier, { maxRequests: number; windowSeconds: number; maxConcurrent: number }> = {
-    free: { maxRequests: 1000, windowSeconds: 3600, maxConcurrent: 10 },
-    pro: { maxRequests: 10000, windowSeconds: 3600, maxConcurrent: 50 },
-    enterprise: { maxRequests: 100000, windowSeconds: 3600, maxConcurrent: 200 },
+    free: { maxRequests: 3, windowSeconds: 86400, maxConcurrent: 1 },
+    pro: { maxRequests: 50, windowSeconds: 86400, maxConcurrent: 5 },
+    enterprise: { maxRequests: 100, windowSeconds: 86400, maxConcurrent: 10 },
 };
 
 declare global {

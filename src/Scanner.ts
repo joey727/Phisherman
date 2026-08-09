@@ -9,7 +9,7 @@ import { WebRiskChecker } from "./checkers/googleWebRisk";
 import { MlChecker } from "./checkers/ml";
 import { PhishStatsChecker } from "./checkers/phishStats";
 import { VirusTotalChecker } from "./checkers/virusTotal";
-import { ScanResult, ParsedUrl } from "./types";
+import { ScanResult, ParsedUrl, ApiKeyTier } from "./types";
 
 // Register all checkers
 registry.register(HeuristicsChecker);
@@ -63,8 +63,15 @@ async function logScanFeedback(url: string, result: ScanResult) {
   }
 }
 
-function scanCacheId(url: string) {
-  return crypto.createHash("sha256").update(url).digest("hex");
+function cacheProfile(tier: ApiKeyTier): string {
+  return tier === "free" ? "free" : "premium";
+}
+
+function scanCacheId(url: string, tier: ApiKeyTier) {
+  return crypto
+    .createHash("sha256")
+    .update(`${cacheProfile(tier)}:${url}`)
+    .digest("hex");
 }
 
 function parseUrl(url: string): ParsedUrl | undefined {
@@ -81,8 +88,12 @@ function parseUrl(url: string): ParsedUrl | undefined {
   }
 }
 
-export async function analyzeUrl(url: string): Promise<ScanResult> {
-  const id = scanCacheId(url);
+export async function analyzeUrl(
+  url: string,
+  opts?: { tier?: ApiKeyTier },
+): Promise<ScanResult> {
+  const tier = opts?.tier ?? "free";
+  const id = scanCacheId(url, tier);
 
   try {
     const cached = await redis.hget(SCAN_CACHE_HASH, id);
@@ -104,7 +115,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
   // Parse URL once upfront and pass to all checkers
   const parsedUrl = parseUrl(url);
 
-  const { checks, timing } = await registry.runAll(url, parsedUrl);
+  const { checks, timing } = await registry.runAll(url, parsedUrl, { tier });
 
   const totalScore = Math.min(
     100,
@@ -147,6 +158,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
     threatType,
     reasons: allReasons,
     executionTimeMs: timing,
+    tier,
   };
 
   try {

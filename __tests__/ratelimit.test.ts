@@ -33,6 +33,7 @@ function mockRes(): Response {
   res.json = jest.fn().mockReturnValue(res);
   res.on = jest.fn().mockReturnValue(res);
   res.removeListener = jest.fn().mockReturnValue(res);
+  res.setHeader = jest.fn().mockReturnValue(res);
   return res as unknown as Response;
 }
 
@@ -50,7 +51,7 @@ describe("apiLimiter", () => {
     await apiLimiter(req, res, next);
 
     expect(mockPipeline.incr).toHaveBeenCalledWith("ratelimit:10.0.0.1");
-    expect(mockPipeline.expire).toHaveBeenCalledWith("ratelimit:10.0.0.1", 900);
+    expect(mockPipeline.expire).toHaveBeenCalledWith("ratelimit:10.0.0.1", 86400);
     expect(next).toHaveBeenCalled();
   });
 
@@ -72,7 +73,7 @@ describe("apiLimiter", () => {
     await apiLimiter(req, res, next);
 
     expect(mockPipeline.incr).toHaveBeenCalledWith("ratelimit:key:abc123def456");
-    expect(mockPipeline.expire).toHaveBeenCalledWith("ratelimit:key:abc123def456", 3600);
+    expect(mockPipeline.expire).toHaveBeenCalledWith("ratelimit:key:abc123def456", 86400);
     expect(next).toHaveBeenCalled();
   });
 
@@ -95,7 +96,7 @@ describe("apiLimiter", () => {
 
     expect(mockPipeline.expire).toHaveBeenCalledWith(
       "ratelimit:key:enterprise_hash",
-      3600,
+      86400,
     );
     expect(next).toHaveBeenCalled();
   });
@@ -141,6 +142,43 @@ describe("apiLimiter", () => {
 
     await apiLimiter(req, res, next);
 
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("sets X-RateLimit headers on success for anonymous", async () => {
+    mockPipeline.exec.mockResolvedValue([1, 1]);
+    const req = mockReq({ ip: "10.0.0.4" });
+    const res = mockRes();
+    const next: NextFunction = jest.fn();
+
+    await apiLimiter(req, res, next);
+
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Limit", "1");
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Remaining", "0");
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Reset", "86400");
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("sets X-RateLimit headers reflecting remaining quota for a free key", async () => {
+    mockPipeline.exec.mockResolvedValue([2, 1]);
+    const apiKey: ApiKeyMetadata = {
+      hash: "free_user_hash",
+      prefix: "ph_free",
+      name: "free-user",
+      tier: "free",
+      enabled: true,
+      createdAt: 1000,
+      lastUsedAt: null,
+    };
+    const req = mockReq({ apiKey });
+    const res = mockRes();
+    const next: NextFunction = jest.fn();
+
+    await apiLimiter(req, res, next);
+
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Limit", "3");
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Remaining", "1");
+    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Reset", "86400");
     expect(next).toHaveBeenCalled();
   });
 });

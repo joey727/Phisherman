@@ -3,9 +3,9 @@ import redis from "../utils/redis";
 import { TIER_CONFIGS } from "../types";
 
 const ANON_MAX_CONCURRENT =
-  Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP) || 10;
-const ANON_WINDOW_SECONDS = Number(process.env.RATE_LIMIT_WINDOW_SECONDS) || 900;
-const ANON_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100;
+  Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP) || 1;
+const ANON_WINDOW_SECONDS = Number(process.env.RATE_LIMIT_WINDOW_SECONDS) || 86400;
+const ANON_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 1;
 const concurrentByKey = new Map<string, number>();
 
 export const apiLimiter = async (
@@ -72,6 +72,13 @@ export const apiLimiter = async (
         current: requests,
       });
     }
+
+    res.setHeader("X-RateLimit-Limit", String(tierConfig.maxRequests));
+    res.setHeader(
+      "X-RateLimit-Remaining",
+      String(Math.max(0, tierConfig.maxRequests - requests)),
+    );
+    res.setHeader("X-RateLimit-Reset", String(tierConfig.windowSeconds));
 
     next();
   } catch (err) {
