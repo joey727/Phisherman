@@ -39,7 +39,7 @@ jobs:
         run: python -m training.pipeline
 
       - name: Auto-commit promoted model + metrics
-        uses: actions/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
           # Needs a repo-scoped PAT (GH_PAT): the default GITHUB_TOKEN cannot
           # push to the default branch or re-trigger workflows.
