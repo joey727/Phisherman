@@ -1,14 +1,14 @@
 {
-  "trained_at": "2026-08-05T11:57:25.579679+00:00",
+  "trained_at": "2026-08-10T17:59:09.139127+00:00",
   "model_file": "phishing_xgboost.joblib",
   "training": {
-    "precision": 0.9968368730230457,
-    "recall": 0.9804444444444445,
-    "f1": 0.9885727089401748,
-    "accuracy": 0.988664147588353,
-    "training_n": 29990,
+    "precision": 0.9972960793150067,
+    "recall": 0.9835555555555555,
+    "f1": 0.9903781606623405,
+    "accuracy": 0.9904423205156702,
+    "training_n": 29991,
     "validation_n": 4499,
-    "pos_rate_train": 0.5001667222407469
+    "pos_rate_train": 0.500150045013504
   },
   "benchmark": {
     "benchmark_n": 42,
@@ -41,28 +41,28 @@
       "fn": 0
     },
     "raw_benign_regression_scores": {
-      "https://render.com/": 0.9193,
-      "https://dashboard.render.com/": 0.9253,
-      "https://dashboard.stripe.com/login": 0.202,
-      "https://docs.github.com/en/actions": 0.0189,
-      "https://www.npmjs.com/package/react": 0.0033,
-      "https://pypi.org/project/requests/": 0.0027,
-      "https://www.cloudflare.com/products/": 0.0787,
-      "https://app.netlify.com/sites": 0.0921,
-      "https://vercel.com/dashboard": 0.8479
+      "https://render.com/": 0.8662,
+      "https://dashboard.render.com/": 0.9309,
+      "https://dashboard.stripe.com/login": 0.1217,
+      "https://docs.github.com/en/actions": 0.0343,
+      "https://www.npmjs.com/package/react": 0.005,
+      "https://pypi.org/project/requests/": 0.0023,
+      "https://www.cloudflare.com/products/": 0.0564,
+      "https://app.netlify.com/sites": 0.1388,
+      "https://vercel.com/dashboard": 0.8195
     },
     "guarded_regression_fp": 0,
     "raw_unguarded_benign_scores": {
-      "https://www.npmjs.com/package/react": 0.0033,
-      "https://pypi.org/project/requests/": 0.0027,
-      "https://www.python.org/downloads/": 0.0279,
-      "https://docs.docker.com/get-started/": 0.0331,
-      "https://kubernetes.io/docs/home/": 0.0503,
-      "https://www.postgresql.org/docs/": 0.1469,
-      "https://getbootstrap.com/docs/": 0.0737,
-      "https://www.w3.org/TR/html/": 0.0021,
-      "https://archive.org/details/": 0.1358,
-      "https://webpack.js.org/concepts/": 0.0711
+      "https://www.npmjs.com/package/react": 0.005,
+      "https://pypi.org/project/requests/": 0.0023,
+      "https://www.python.org/downloads/": 0.0055,
+      "https://docs.docker.com/get-started/": 0.0621,
+      "https://kubernetes.io/docs/home/": 0.1165,
+      "https://www.postgresql.org/docs/": 0.0368,
+      "https://getbootstrap.com/docs/": 0.2268,
+      "https://www.w3.org/TR/html/": 0.0019,
+      "https://archive.org/details/": 0.1329,
+      "https://webpack.js.org/concepts/": 0.0838
     },
     "raw_unguarded_benign_fp": 0
   },
@@ -72,13 +72,13 @@
     "raw_phishing_recall_ok": true,
     "f1_not_regressed": true
   },
-  "was_better_than": 0.9032,
+  "was_better_than": 1.0,
   "data": {
-    "feed_positives": 86126,
+    "feed_positives": 87623,
     "delayed_positives": 0,
-    "delayed_negatives": 0,
+    "delayed_negatives": 1,
     "benign_pool": 14990,
     "train_positives": 15000,
-    "train_negatives": 14990
+    "train_negatives": 14991
   }
 }
