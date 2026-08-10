@@ -41,8 +41,9 @@ jobs:
       - name: Auto-commit promoted model + metrics
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          # Needs a repo-scoped PAT (GH_PAT): the default GITHUB_TOKEN cannot
-          # push to the default branch or re-trigger workflows.
-          token: ${{ secrets.GH_PAT }}
           commit_message: "chore(ml): promote retrained model"
           file_pattern: "ml-service/models/phishing_xgboost.joblib ml-service/models/metrics.json"
+        env:
+          # Needs a repo-scoped PAT (GH_PAT): the default GITHUB_TOKEN cannot
+          # push to the default branch or re-trigger workflows.
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
