@@ -169,6 +169,9 @@ ML_FEEDBACK_ENABLED=false
 # Optional -- Server
 PORT=4000
 
+# Optional -- key management (mint-only POST /keys requires this; fails closed if unset)
+ISSUER_API_KEY=your-issuer-token
+
 # Optional -- Cache "safe" scan results (default: false, to save Redis space)
 SCAN_CACHE_SAFE_RESULTS=false
 ```
