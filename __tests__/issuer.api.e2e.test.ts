@@ -193,3 +193,48 @@ describe("Issuer API Key Endpoint (mint-only, POST /keys)", () => {
     process.env.ISSUER_API_KEY = ISSUER_KEY;
   });
 });
+
+describe("GET /api/keys/validate", () => {
+  it("validates a real API key and returns its tier", async () => {
+    const { createApiKey } = require("../src/utils/apiKeys");
+    const { apiKey } = await createApiKey("tester", "pro");
+
+    const res = await request(app)
+      .get("/api/keys/validate")
+      .set("Authorization", `Bearer ${apiKey}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.valid).toBe(true);
+    expect(res.body.tier).toBe("pro");
+    expect(res.body.name).toBe("tester");
+    expect(res.body.enabled).toBe(true);
+  });
+
+  it("rejects an unknown API key", async () => {
+    const res = await request(app)
+      .get("/api/keys/validate")
+      .set("Authorization", "Bearer ph_doesnotexist1234567890");
+
+    expect(res.status).toBe(401);
+    expect(res.body.valid).toBe(false);
+  });
+
+  it("rejects a request without a key", async () => {
+    const res = await request(app).get("/api/keys/validate");
+    expect(res.status).toBe(401);
+    expect(res.body.valid).toBe(false);
+  });
+
+  it("rejects a disabled key", async () => {
+    const { createApiKey, updateApiKey, hashApiKey } = require("../src/utils/apiKeys");
+    const { apiKey } = await createApiKey("disabled-user", "free");
+    await updateApiKey(hashApiKey(apiKey), { enabled: false });
+
+    const res = await request(app)
+      .get("/api/keys/validate")
+      .set("Authorization", `Bearer ${apiKey}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body.valid).toBe(false);
+  });
+});

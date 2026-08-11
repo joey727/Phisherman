@@ -118,6 +118,19 @@ export function createApp() {
     }
   });
 
+  // Public API key validation (does not consume a scan)
+  app.get("/api/keys/validate", async (req: Request, res: Response) => {
+    if (!req.apiKey) {
+      return res.status(401).json({ valid: false, error: "Invalid or missing API key" });
+    }
+    return res.json({
+      valid: true,
+      tier: req.apiKey.tier,
+      name: req.apiKey.name,
+      enabled: req.apiKey.enabled,
+    });
+  });
+
   // Admin API key management
   app.post("/admin/keys", requireAdmin, async (req: Request, res: Response) => {
     const { name, tier } = req.body;
