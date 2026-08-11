@@ -66,7 +66,7 @@ export async function getApiKey(
     name: data.name,
     email: data.email || undefined,
     tier: data.tier as ApiKeyTier,
-    enabled: data.enabled === "true",
+    enabled: String(data.enabled) === "true",
     createdAt: Number(data.createdAt),
     lastUsedAt: data.lastUsedAt ? Number(data.lastUsedAt) : null,
   };

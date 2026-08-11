@@ -271,6 +271,23 @@ describe("apiKeys utility", () => {
       const result = await getApiKey("nonexistenthash1234567890123456789012345678901234567890123456789012345678901234");
       expect(result).toBeNull();
     });
+
+    it("treats a boolean-true enabled field (as deserialized by @upstash/redis) as enabled", async () => {
+      const { apiKey, metadata } = await createApiKey("bool-enabled", "pro");
+      const hash = hashApiKey(apiKey);
+      mockedRedis.hgetall.mockResolvedValueOnce({
+        name: "bool-enabled",
+        prefix: metadata.prefix,
+        tier: "pro",
+        enabled: true,
+        createdAt: metadata.createdAt,
+        lastUsedAt: "",
+      });
+
+      const result = await getApiKey(hash);
+      expect(result).not.toBeNull();
+      expect(result!.enabled).toBe(true);
+    });
   });
 
   describe("listApiKeys", () => {
@@ -386,6 +403,23 @@ describe("apiKeys utility", () => {
 
       const stored = await getApiKey(hash);
       expect(stored!.lastUsedAt).toBeGreaterThan(0);
+    });
+
+    it("accepts a key whose stored enabled field is the boolean true (upstash deserialization)", async () => {
+      const { apiKey, metadata } = await createApiKey("bool-verify", "pro");
+      const hash = hashApiKey(apiKey);
+      mockedRedis.hgetall.mockResolvedValueOnce({
+        name: "bool-verify",
+        prefix: metadata.prefix,
+        tier: "pro",
+        enabled: true,
+        createdAt: metadata.createdAt,
+        lastUsedAt: "",
+      });
+
+      const result = await verifyApiKey(apiKey);
+      expect(result).not.toBeNull();
+      expect(result!.enabled).toBe(true);
     });
   });
 });
