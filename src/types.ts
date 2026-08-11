@@ -34,6 +34,7 @@ export interface ApiKeyMetadata {
     hash: string;
     prefix: string;
     name: string;
+    email?: string;
     tier: ApiKeyTier;
     enabled: boolean;
     createdAt: number;

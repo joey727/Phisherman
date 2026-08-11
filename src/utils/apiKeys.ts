@@ -17,20 +17,24 @@ export function hashApiKey(apiKey: string): string {
 export async function createApiKey(
   name: string,
   tier: ApiKeyTier,
+  email?: string,
 ): Promise<{ apiKey: string; metadata: ApiKeyMetadata }> {
   const apiKey = generateApiKey();
   const hash = hashApiKey(apiKey);
   const prefix = apiKey.substring(0, 8);
   const createdAt = Date.now();
 
-  await redis.hset(`apikey:${hash}`, {
+  const fields: Record<string, string> = {
     prefix,
     name,
     tier,
     enabled: "true",
     createdAt: String(createdAt),
     lastUsedAt: "",
-  });
+  };
+  if (email) fields.email = email;
+
+  await redis.hset(`apikey:${hash}`, fields);
   await redis.zadd("apikeys", { score: createdAt, member: hash });
 
   return {
@@ -39,6 +43,7 @@ export async function createApiKey(
       hash,
       prefix,
       name,
+      email,
       tier,
       enabled: true,
       createdAt,
@@ -59,6 +64,7 @@ export async function getApiKey(
     hash,
     prefix: data.prefix,
     name: data.name,
+    email: data.email || undefined,
     tier: data.tier as ApiKeyTier,
     enabled: data.enabled === "true",
     createdAt: Number(data.createdAt),

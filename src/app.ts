@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { analyzeUrl } from "./Scanner";
 import { apiLimiter } from "./middleware/ratelimit";
 import { authMiddleware } from "./middleware/auth";
@@ -17,6 +18,29 @@ import { ApiKeyTier } from "./types";
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.isAdmin) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(email: unknown): email is string {
+  return typeof email === "string" && email.length <= 254 && EMAIL_RE.test(email);
+}
+
+const issuerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+function requireIssuer(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.ISSUER_API_KEY;
+  if (!expected) return res.status(503).json({ error: "Issuer not configured" });
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ") || auth.slice(7).trim() !== expected) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
@@ -71,6 +95,29 @@ export function createApp() {
     }
   });
 
+  // Mint-only, self-service endpoint for the private billing service.
+  app.post("/keys", issuerLimiter, requireIssuer, async (req: Request, res: Response) => {
+    const { name, email, tier } = req.body;
+
+    if (!name || typeof name !== "string" || name.length > 120) {
+      return res.status(400).json({ error: "Missing or invalid 'name'" });
+    }
+    if (email !== undefined && email !== null && !isValidEmail(email)) {
+      return res.status(400).json({ error: "Invalid 'email'" });
+    }
+
+    const validTier: ApiKeyTier =
+      ["free", "pro", "enterprise"].includes(tier) ? tier : "free";
+
+    try {
+      const result = await createApiKey(name, validTier, email);
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("Failed to issue API key:", err);
+      return res.status(500).json({ error: "Failed to issue API key" });
+    }
+  });
+
   // Admin API key management
   app.post("/admin/keys", requireAdmin, async (req: Request, res: Response) => {
     const { name, tier } = req.body;
@@ -97,6 +144,7 @@ export function createApp() {
         hash: k.hash,
         prefix: k.prefix,
         name: k.name,
+        email: k.email,
         tier: k.tier,
         enabled: k.enabled,
         createdAt: k.createdAt,

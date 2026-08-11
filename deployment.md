@@ -149,6 +149,13 @@ Optional API variables:
 | `MAX_CONCURRENT_REQUESTS_PER_IP` | `10` | Per-worker concurrent scan cap |
 | `MAX_INFLIGHT_REQUESTS` | `200` | Per-worker global in-flight cap |
 
+Key-management variables:
+
+| Variable | Description |
+|----------|-------------|
+| `ADMIN_API_KEY` | Bearer token for full `POST/GET/PATCH/DELETE /admin/keys` management |
+| `ISSUER_API_KEY` | Bearer token for the mint-only `POST /keys` endpoint (used by the self-service billing service; endpoint fails closed if unset) |
+
 Optional ML service variables:
 
 | Variable | Default | Description |
