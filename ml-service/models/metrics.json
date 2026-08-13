@@ -1,34 +1,35 @@
 {
-  "trained_at": "2026-08-10T17:59:09.139127+00:00",
+  "trained_at": "2026-08-13T22:44:48.273671+00:00",
   "model_file": "phishing_xgboost.joblib",
   "training": {
-    "precision": 0.9972960793150067,
-    "recall": 0.9835555555555555,
-    "f1": 0.9903781606623405,
-    "accuracy": 0.9904423205156702,
+    "precision": 0.9904632152588556,
+    "recall": 0.9693333333333334,
+    "f1": 0.9797843665768194,
+    "accuracy": 0.9799955545676817,
     "training_n": 29991,
     "validation_n": 4499,
     "pos_rate_train": 0.500150045013504
   },
   "benchmark": {
-    "benchmark_n": 42,
+    "benchmark_n": 116,
     "benchmark_phishing": 19,
-    "benchmark_benign": 23,
+    "benchmark_benign": 97,
     "thresholds": {
       "suspicious": 0.4,
       "phishing": 0.7
     },
     "raw": {
-      "precision": 0.9048,
+      "precision": 1.0,
       "recall": 1.0,
-      "f1": 0.95,
-      "false_positive_rate": 0.087,
+      "f1": 1.0,
+      "false_positive_rate": 0.0,
       "false_negative_rate": 0.0,
       "tp": 19,
-      "fp": 2,
-      "tn": 21,
+      "fp": 0,
+      "tn": 97,
       "fn": 0
     },
+    "raw_fp_offenders": {},
     "guarded": {
       "precision": 1.0,
       "recall": 1.0,
@@ -37,44 +38,339 @@
       "false_negative_rate": 0.0,
       "tp": 19,
       "fp": 0,
-      "tn": 23,
+      "tn": 97,
       "fn": 0
     },
     "raw_benign_regression_scores": {
-      "https://render.com/": 0.8662,
-      "https://dashboard.render.com/": 0.9309,
-      "https://dashboard.stripe.com/login": 0.1217,
-      "https://docs.github.com/en/actions": 0.0343,
-      "https://www.npmjs.com/package/react": 0.005,
-      "https://pypi.org/project/requests/": 0.0023,
-      "https://www.cloudflare.com/products/": 0.0564,
-      "https://app.netlify.com/sites": 0.1388,
-      "https://vercel.com/dashboard": 0.8195
+      "https://render.com/": 0.0004,
+      "https://dashboard.render.com/": 0.0058,
+      "https://dashboard.stripe.com/login": 0.0072,
+      "https://docs.github.com/en/actions": 0.0005,
+      "https://www.npmjs.com/package/react": 0.0025,
+      "https://pypi.org/project/requests/": 0.0042,
+      "https://www.cloudflare.com/products/": 0.0006,
+      "https://app.netlify.com/sites": 0.0003,
+      "https://vercel.com/dashboard": 0.0022
     },
     "guarded_regression_fp": 0,
-    "raw_unguarded_benign_scores": {
-      "https://www.npmjs.com/package/react": 0.005,
-      "https://pypi.org/project/requests/": 0.0023,
-      "https://www.python.org/downloads/": 0.0055,
-      "https://docs.docker.com/get-started/": 0.0621,
-      "https://kubernetes.io/docs/home/": 0.1165,
-      "https://www.postgresql.org/docs/": 0.0368,
-      "https://getbootstrap.com/docs/": 0.2268,
-      "https://www.w3.org/TR/html/": 0.0019,
-      "https://archive.org/details/": 0.1329,
-      "https://webpack.js.org/concepts/": 0.0838
+    "world_benign_raw_scores": {
+      "https://www.google.com": 0.0004,
+      "https://github.com/n8n-io/n8n": 0.0002,
+      "https://stackoverflow.com/questions/123456": 0.0015,
+      "https://en.wikipedia.org/wiki/Widget": 0.0054,
+      "https://www.amazon.com/dp/B0I5WWRWNW": 0.0004,
+      "https://www.youtube.com/watch?v=abcxyz": 0.0578,
+      "https://www.reddit.com/r/notebook/": 0.0002,
+      "https://developer.mozilla.org/en-US/docs/Web": 0.0028,
+      "https://www.bbc.com/news/technology": 0.0008,
+      "https://mail.linkedin.com/me/": 0.0006,
+      "https://calendar.google.com/calendar/r": 0.0225,
+      "https://open.spotify.com/track/111": 0.0004,
+      "https://cloud.google.com/compute": 0.0277,
+      "https://dashboard.render.com/": 0.0058,
+      "https://dashboard.stripe.com/login": 0.0072,
+      "https://cloud.digitalocean.com/projects": 0.0524,
+      "https://docs.github.com/en/actions": 0.0005,
+      "https://www.npmjs.com/package/react": 0.0025,
+      "https://pypi.org/project/requests/": 0.0042,
+      "https://www.cloudflare.com/products/": 0.0006,
+      "https://app.netlify.com/sites": 0.0003,
+      "https://vercel.com/dashboard": 0.0022,
+      "https://www.shopify.com/": 0.0002,
+      "https://shopify.com/": 0.0005,
+      "https://shopify.com/login": 0.0017,
+      "https://www.salesforce.com/": 0.0018,
+      "https://www.notion.so/": 0.0007,
+      "https://notion.so/": 0.0013,
+      "https://zoom.us/": 0.0008,
+      "https://www.amazonaws.com/": 0.0004,
+      "https://googleusercontent.com/": 0.0262,
+      "https://www.googleapis.com/auth": 0.0004,
+      "https://www.bankofamerica.com/": 0.0024,
+      "https://www.wellsfargo.com/": 0.0014,
+      "https://www.citi.com/": 0.0009,
+      "https://www.chase.com/": 0.0003,
+      "https://www.usps.com/": 0.0008,
+      "https://www.fedex.com/": 0.0004,
+      "https://www.dhl.com/": 0.0009,
+      "https://www.ebay.com/": 0.0007,
+      "https://www.instagram.com/": 0.0003,
+      "https://twitter.com/": 0.0008,
+      "https://www.dropbox.com/": 0.0003,
+      "https://outlook.com/": 0.0009,
+      "https://yahoo.com/": 0.0014,
+      "https://www.office.com/": 0.0001,
+      "https://www.icloud.com/": 0.0002,
+      "https://www.heroku.com/": 0.0002,
+      "https://fly.io/": 0.001,
+      "https://www.linode.com/": 0.0003,
+      "https://www.digitalocean.com/": 0.0024,
+      "https://www.nike.com/": 0.0007,
+      "https://www.adidas.com/": 0.4294,
+      "https://www.bmw.com/": 0.401,
+      "https://www.toyota.com/": 0.0002,
+      "https://www.walmart.com/": 0.0003,
+      "https://www.target.com/": 0.0001,
+      "https://www.ikea.com/": 0.001,
+      "https://www.costco.com/": 0.0005,
+      "https://www.tesla.com/": 0.0003,
+      "https://www.nvidia.com/": 0.0003,
+      "https://www.oracle.com/": 0.0002,
+      "https://www.cisco.com/": 0.0004,
+      "https://www.adobe.com/": 0.0005,
+      "https://www.spotify.com/": 0.0002,
+      "https://www.airbnb.com/": 0.0003,
+      "https://www.uber.com/": 0.0007,
+      "https://www.etsy.com/": 0.001,
+      "https://www.pinterest.com/": 0.0002,
+      "https://www.twitch.tv/": 0.0013,
+      "https://www.tiktok.com/": 0.0002,
+      "https://www.snapchat.com/": 0.0003,
+      "https://www.openai.com/": 0.0002,
+      "https://www.ibm.com/": 0.0004,
+      "https://www.sap.com/": 0.1498,
+      "https://www.vmware.com/": 0.4869,
+      "https://www.siemens.com/": 0.0003,
+      "https://www.samsung.com/": 0.0002,
+      "https://www.sony.com/": 0.0004,
+      "https://www.lenovo.com/": 0.0002,
+      "https://www.hp.com/": 0.0007,
+      "https://www.dell.com/": 0.0003,
+      "https://www.honda.com/": 0.3145,
+      "https://www.ford.com/": 0.0003,
+      "https://www.mercedes-benz.com/": 0.0192,
+      "https://www.zara.com/": 0.412,
+      "https://www.hm.com/": 0.2522,
+      "https://www.tesco.com/": 0.5178,
+      "https://www.bestbuy.com/": 0.0002,
+      "https://www.homedepot.com/": 0.0003,
+      "https://www.lowes.com/": 0.0007,
+      "https://www.kroger.com/": 0.0002,
+      "https://mail.google.com/": 0.0006,
+      "https://app.spotify.com/": 0.0003,
+      "https://m.facebook.com/": 0.0028,
+      "https://account.microsoft.com/": 0.0016,
+      "https://support.apple.com/": 0.0012
     },
-    "raw_unguarded_benign_fp": 0
+    "guarded_benign": [
+      {
+        "url": "https://docs.python.org/library/",
+        "raw_probability": 0.0176,
+        "age_days": 11462,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.python.org/",
+        "raw_probability": 0.1881,
+        "age_days": 11462,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.python.org/downloads/",
+        "raw_probability": 0.0145,
+        "age_days": 11462,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.postgresql.org/",
+        "raw_probability": 0.8165,
+        "age_days": 10887,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://postgresql.org/docs/",
+        "raw_probability": 0.1223,
+        "age_days": 10887,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.gnu.org/",
+        "raw_probability": 0.1249,
+        "age_days": 11220,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://nodejs.org/en",
+        "raw_probability": 0.8445,
+        "age_days": 6162,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://getbootstrap.com/",
+        "raw_probability": 0.7745,
+        "age_days": 5329,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://getbootstrap.com/docs/",
+        "raw_probability": 0.3259,
+        "age_days": 5329,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://webpack.js.org/",
+        "raw_probability": 0.6823,
+        "age_days": 11005,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://webpack.js.org/concepts/",
+        "raw_probability": 0.0546,
+        "age_days": 11005,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.archlinux.org/",
+        "raw_probability": 0.8234,
+        "age_days": 8927,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://reactjs.org/docs/",
+        "raw_probability": 0.1436,
+        "age_days": 4824,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.docker.com/",
+        "raw_probability": 0.4433,
+        "age_days": 11523,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://docs.docker.com/get-started/",
+        "raw_probability": 0.4764,
+        "age_days": 11523,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://kubernetes.io/",
+        "raw_probability": 0.7493,
+        "age_days": 4404,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://kubernetes.io/docs/home/",
+        "raw_probability": 0.0854,
+        "age_days": 4404,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://archive.org/details/",
+        "raw_probability": 0.4104,
+        "age_days": 11200,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.w3.org/TR/html/",
+        "raw_probability": 0.0022,
+        "age_days": 11726,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://news.ycombinator.com/",
+        "raw_probability": 0.9785,
+        "age_days": 7816,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.anthropic.com/",
+        "raw_probability": 0.4821,
+        "age_days": 9081,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.miele.com/",
+        "raw_probability": 0.3101,
+        "age_days": 11259,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.leica-camera.com/",
+        "raw_probability": 0.9965,
+        "age_days": 11066,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.napaonline.com/",
+        "raw_probability": 0.9777,
+        "age_days": 11051,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.goodyear.com/",
+        "raw_probability": 0.9163,
+        "age_days": 12301,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.hollisterco.com/",
+        "raw_probability": 0.9741,
+        "age_days": 8899,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://www.quizlet.com/",
+        "raw_probability": 0.9044,
+        "age_days": 8064,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://firehydrant.io/",
+        "raw_probability": 0.9708,
+        "age_days": 3428,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      },
+      {
+        "url": "https://oncall.tools/",
+        "raw_probability": 0.9851,
+        "age_days": 4592,
+        "veto_fires": true,
+        "guarded_prediction": 0
+      }
+    ],
+    "guarded_veto_ok": true,
+    "guarded_veto_benign_fp": 0
   },
   "promotion_gates": {
     "guarded_benign_fp_ok": true,
-    "raw_unguarded_benign_ok": true,
+    "raw_world_benign_ok": true,
     "raw_phishing_recall_ok": true,
+    "guarded_veto_ok": true,
+    "guarded_veto_benign_ok": true,
     "f1_not_regressed": true
   },
   "was_better_than": 1.0,
   "data": {
-    "feed_positives": 87623,
+    "feed_positives": 25951,
     "delayed_positives": 0,
     "delayed_negatives": 1,
     "benign_pool": 14990,
