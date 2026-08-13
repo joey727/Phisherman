@@ -10,7 +10,11 @@ const KEY_WHOIS_DATA = "whois_data";
 const KEY_WHOIS_EXPIRY = "whois_expiry";
 const KEY_RDAP_DATA = "rdap_data";
 const KEY_RDAP_EXPIRY = "rdap_expiry";
-const RDAP_TIMEOUT_MS = 2500;
+// RDAP is only attempted when the URL could qualify for the veto and the whois
+// lookup failed. The combined budget across both bases must fit inside the
+// heuristics checker's deadline (CheckerRegistry.TIMEOUT_MS = 2500) alongside
+// DNS + whois, otherwise the whole checker times out and loses its signal.
+const RDAP_TOTAL_MS = 2000;
 
 // ---------------------------------------------------------------------------
 // Established-domain veto
@@ -75,10 +79,13 @@ const RDAP_INPROC_NULL_TTL = 15 * 60 * 1000;
 const rdapCache = new Map<string, { date: string | null; ts: number }>();
 
 async function fetchRdapDate(domain: string): Promise<string | null> {
+  const deadline = Date.now() + RDAP_TOTAL_MS;
   for (const base of RDAP_BASES) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), RDAP_TIMEOUT_MS);
+      const timer = setTimeout(() => controller.abort(), remaining);
       try {
         const resp = await fetch(base + encodeURIComponent(domain), {
           signal: controller.signal,
@@ -146,7 +153,11 @@ async function rdapCreationDate(domain: string): Promise<string | null> {
   return date;
 }
 
-async function whoisCheck(regDomain: string, hostname: string) {
+async function whoisCheck(
+  regDomain: string,
+  hostname: string,
+  opts?: { skipRdap?: boolean },
+) {
   const reasons: string[] = [];
   const details: Record<string, any> = {};
   let scoreDelta = 0;
@@ -161,8 +172,10 @@ async function whoisCheck(regDomain: string, hostname: string) {
     if (cached) {
       whoisInfo = JSON.parse(cached as string);
     } else {
-      // Wrap whois in a timeout -- the library uses raw TCP sockets with no built-in timeout
-      const WHOIS_TIMEOUT_MS = 2000;
+      // Wrap whois in a timeout -- the library uses raw TCP sockets with no built-in
+      // timeout. whois is the flaky source, so keep it short and let RDAP (the
+      // reliable HTTPS source) serve as the fallback for veto-eligible URLs.
+      const WHOIS_TIMEOUT_MS = 300;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const whoisRaw = await Promise.race([
@@ -199,7 +212,7 @@ async function whoisCheck(regDomain: string, hostname: string) {
   };
 
   let creationDate: string | null = details.whois.creationDate ?? null;
-  if (!creationDate) {
+  if (!creationDate && !opts?.skipRdap) {
     // whois failed to yield a creation date -- fall back to RDAP (cached)
     creationDate = await rdapCreationDate(lookupKey);
     if (creationDate) {
@@ -327,23 +340,13 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
     reasons.push("DNS failed or private network");
   }
 
-  // whois lookup
-  const whoisResult = await whoisCheck(domain, hostname);
-  score += whoisResult.scoreDelta;
-  reasons.push(...whoisResult.reasons);
-
-  score = Math.max(0, score);
-
-  // Established-domain veto: an old registered domain + a lexically clean URL is
-  // a safe-looking URL regardless of what the lexical ML model thinks. Attackers
-  // register fresh domains, so the age rule already excludes their URLS; feed
-  // checkers (URLHaus, PhishTank, SafeBrowsing, VT) still run and can override.
-  const ageDays = whoisResult.details.domainAgeDays;
+  // Established-domain veto preconditions that need no network. If any fail the
+  // veto cannot fire, so the whois/RDAP age lookup (the slowest part) is only
+  // attempted when the URL could still qualify -- otherwise a fresh phish domain
+  // would burn the RDAP budget and time the whole checker out.
   const urlLower = url.toLowerCase();
   const apex = domainInfo.domain || "";
-  const veto =
-    typeof ageDays === "number" &&
-    ageDays >= 365 &&
+  const vetoEligible =
     dnsResolved &&
     protocol === "https:" &&
     !(domainInfo.publicSuffix && SUSPICIOUS_TLDS.has(domainInfo.publicSuffix)) &&
@@ -354,6 +357,22 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
     parts.length <= 4 &&
     !BRAND_KEYWORDS.some((b) => b !== apex && hasWordBoundary(urlLower, b)) &&
     !SUSPICIOUS_KEYWORDS.some((k) => hasWordBoundary(urlLower, k));
+
+  // whois lookup
+  const whoisResult = await whoisCheck(domain, hostname, {
+    skipRdap: !vetoEligible,
+  });
+  score += whoisResult.scoreDelta;
+  reasons.push(...whoisResult.reasons);
+
+  score = Math.max(0, score);
+
+  // Established-domain veto: an old registered domain + a lexically clean URL is
+  // a safe-looking URL regardless of what the lexical ML model thinks. Attackers
+  // register fresh domains, so the age rule already excludes their URLS; feed
+  // checkers (URLHaus, PhishTank, SafeBrowsing, VT) still run and can override.
+  const ageDays = whoisResult.details.domainAgeDays;
+  const veto = typeof ageDays === "number" && ageDays >= 365 && vetoEligible;
 
   return { score, reasons, veto };
 }
