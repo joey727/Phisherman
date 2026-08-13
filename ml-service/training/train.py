@@ -75,6 +75,30 @@ PHISHING_PATTERNS = [
 ]
 
 BENIGN_PATTERNS = [
+    # Real-world landing/login shapes (bare apex, www prefix, trailing slash,
+    # short single-segment paths). These are the most common benign URL forms in
+    # the wild; keeping them in the synthetic set prevents the model from learning
+    # "short URL / trailing slash / www. = phishing".
+    "https://www.{platform}.com/",
+    "https://{platform}.com/",
+    "https://www.{platform}.com/{short_path}",
+    "https://{platform}.com/{short_path}",
+    "https://www.{platform}.com/login",
+    "https://{platform}.com/login",
+    "https://www.{platform}.com/account",
+    "https://{platform}.com/account",
+    "https://www.{platform}.com/signin",
+    "https://{platform}.com/signin",
+    "https://www.{platform}.com/support",
+    "https://{platform}.com/help",
+    "https://www.{platform}.com/products",
+    "https://www.{platform}.com/about",
+    "https://{platform}.com/settings",
+    "https://www.{platform}.com/dashboard",
+    "https://{platform}.io/",
+    "https://www.{platform}.org/",
+    "https://docs.{platform}.com/{short_path}",
+    "https://support.{platform}.com/help/{short_path}",
     "https://www.google.com/search?q={query}",
     "https://github.com/{user}/{repo}",
     "https://stackoverflow.com/questions/{num}/{slug}",
@@ -144,6 +168,7 @@ def _generate_url(pattern: str, is_phishing: bool) -> str:
         "{tld}": random.choice(tld_pool),
         "{path}": "/".join(_rand_str(random.randint(3, 8)) for _ in range(random.randint(1, 4))),
         "{long_path}": "/".join(_rand_str(random.randint(4, 10)) for _ in range(random.randint(4, 8))),
+        "{short_path}": _rand_str(random.randint(3, 8)),
         "{short}": _rand_str(6),
         "{query}": "+".join(_rand_str(random.randint(3, 8)) for _ in range(random.randint(1, 3))),
         "{user}": _rand_str(random.randint(4, 12)),
@@ -301,7 +326,10 @@ def build_classifier() -> XGBClassifier:
         scale_pos_weight=1.0,  # balanced dataset
         eval_metric="logloss",
         random_state=42,
-        n_jobs=-1,
+        tree_method="hist",
+        # n_jobs=1 keeps training fully deterministic so promotion decisions are
+        # reproducible across weekly runs (multi-threaded XGBoost is not).
+        n_jobs=1,
     )
 
 
