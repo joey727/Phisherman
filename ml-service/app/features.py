@@ -40,17 +40,76 @@ SUSPICIOUS_KEYWORDS = frozenset([
     "credential", "signin", "billing", "invoice", "refund", "reward",
 ])
 
+# Popular global brands/platforms whose real apex is treated as benign by the
+# trusted-apex guard. This is a *bounded, curated* allowlist used only as a
+# fast-path for the official site; lookalike phishing lives on a different apex
+# (e.g. paypal-secure-verify.tk) and is NOT in this set. Model quality is
+# independently enforced by the raw-model promotion gate, so this list cannot
+# mask a broken classifier.
+POPULAR_APEXES = frozenset([
+    "adobe", "airbnb", "alibaba", "atlassian", "autodesk", "baidu",
+    "bestbuy", "booking", "canva", "capitalone", "cisco", "coca-cola",
+    "costco", "dell", "disney", "ebay", "etsy", "expedia", "fedex",
+    "figma", "ford", "gopro", "hermes", "homedepot", "hp", "hulu",
+    "ibm", "ikea", "intel", "jetblue", "kroger", "lenovo", "lowes",
+    "mercedes-benz", "miro", "nike", "notion", "nvidia", "openai",
+    "oracle", "pinterest", "salesforce", "samsung", "shopify", "siemens",
+    "slack", "snapchat", "sony", "spotify", "target", "telegram",
+    "tesla", "tiktok", "toyota", "tumblr", "twitch", "uber", "usps",
+    "walmart", "zoom",
+])
+
 # Registrable/apex domains that are legitimate well-known brands. Being a
 # trusted apex means the site is the official brand site, so keyword/brand
 # impersonation signals are suppressed there. A phishing URL that spoofs a
 # brand lives on a *different* apex (e.g. paypal-secure-verify.tk), which is
 # NOT in this set and therefore still gets flagged.
-TRUSTED_APEX = BRAND_KEYWORDS | frozenset([
+TRUSTED_APEX = BRAND_KEYWORDS | POPULAR_APEXES | frozenset([
     "github", "wikipedia", "reddit", "stackoverflow", "mozilla", "bing",
     "bbc", "nytimes", "office", "githubusercontent", "wix", "medium",
     "wordpress", "squarespace", "gitlab", "cloudflare", "vercel", "netlify",
     "render", "stripe", "heroku", "fly", "digitalocean", "linode",
+    # Official brand host subdomains whose registered domain embeds a brand
+    # name as a prefix (microsoftonline, amazonaws, googleusercontent, ...).
+    "microsoftonline", "microsoft365", "amazonaws", "googleusercontent",
+    "googleapis", "googleanalytics", "adwords", "office365", "live",
+    "livechat", "outlook", "auth0",
 ])
+
+# Official sites are only treated as trusted when hosted on a normal top-level
+# domain. `paypal.tk` / `apple.ga` are NOT the official site even though the
+# apex string matches a brand — a suspicious TLD defeats the trust assumption.
+OFFICIAL_SUFFIXES = frozenset([
+    "com", "org", "net", "io", "co", "dev", "ai", "app", "gov", "edu",
+    "uk", "de", "fr", "ca", "au", "in", "jp", "kr", "cn", "br", "mx",
+    "es", "it", "nl", "se", "no", "fi", "dk", "pl", "ch", "at", "be",
+    "ie", "nz", "sg", "info", "me", "tv", "cc", "ru",
+])
+
+
+# Registered-domain *age* (from the backend's whois or the ml-service's own
+# RDAP lookup) is the enrichment feature (index 40) used to tell established
+# legitimate domains from freshly-registered phishing domains. It replaces the
+# large Tranco popularity list the model used to depend on.
+
+
+
+def is_trusted_apex(url: str) -> bool:
+    """True if the URL's effective apex (eTLD+1) is an official brand/popular site.
+
+    Phishing impersonators almost never obtain the real brand apex (attacker
+    apexes differ, e.g. paypal-secure-verify.tk), so a trusted apex is treated
+    as benign — but only on a normal TLD. `paypal.tk` is NOT considered official.
+    """
+    try:
+        ext = tldextract.extract(url)
+        if not (ext.domain and ext.domain.lower() in TRUSTED_APEX):
+            return False
+        if ext.suffix and ext.suffix.lower() in SUSPICIOUS_TLDS:
+            return False
+        return True
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -113,19 +172,68 @@ def _brand_impersonation_count(url_lower: str, apex_domain: str) -> int:
     Visiting the official brand site (e.g. `google` for `google.com`) is not
     impersonation; impersonation means a brand keyword appears in a URL whose own
     apex/registered domain is a different brand or a suspicious domain.
+
+    Word-boundary matching avoids false hits from brands concatenated with other
+    letters in official host names: `login.microsoftonline.com` contains the
+    substring "microsoft" but "microsoft" is not a whole word there, so it is
+    NOT counted as impersonation (Microsoft owns microsoftonline.com). A lookalike
+    such as `paypal-secure-verify.tk` still matches because "paypal" is followed
+    by a word boundary ("-").
     """
     count = 0
     for brand in BRAND_KEYWORDS:
         if apex_domain and brand == apex_domain:
             continue
-        if brand in url_lower:
+        if re.search(rf"\b{re.escape(brand)}\b", url_lower):
             count += 1
     return count
 
 
 def _suspicious_keyword_count(url_lower: str) -> int:
-    """Count suspicious keywords in the URL."""
-    return sum(1 for kw in SUSPICIOUS_KEYWORDS if kw in url_lower)
+    """Count suspicious keywords in the URL (whole-word only)."""
+    return sum(
+        1 for kw in SUSPICIOUS_KEYWORDS if re.search(rf"\b{re.escape(kw)}\b", url_lower)
+    )
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Compute the Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(
+                min(
+                    prev[j] + 1,
+                    cur[j - 1] + 1,
+                    prev[j - 1] + (0 if ca == cb else 1),
+                )
+            )
+        prev = cur
+    return prev[-1]
+
+
+def _brand_typosquat_min_distance(domain_lower: str, apex_domain: str) -> float:
+    """Minimum edit distance between the registered domain and any known brand.
+
+    A distance of 1-3 indicates a likely brand typosquat/homoglyph lookalike
+    (e.g. `paypa1.com`, `amaz0n.com`). The official site (distance 0) is handled
+    by the trusted-apex guard and returns a large sentinel so it reads as benign.
+    """
+    if not domain_lower:
+        return 50.0
+    if apex_domain and apex_domain in TRUSTED_APEX:
+        return 50.0
+    best = 50
+    for brand in BRAND_KEYWORDS:
+        d = _levenshtein(domain_lower, brand)
+        if d < best:
+            best = d
+            if best <= 1:
+                break
+    return float(best)
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +287,12 @@ FEATURE_NAMES = [
     "path_has_double_extension",
     "has_at_in_path",
     "url_contains_hex_chars",
-    # Enrichment metadata (40-42) — may be zero if not provided
+    # Enrichment metadata (40-42) — may be -1/0 if not provided
     "domain_age_days",
     "prior_score",
     "prior_checker_count",
+    # Typosquat / homoglyph similarity (43) — min edit distance to a known brand
+    "brand_typosquat_min_distance",
 ]
 
 NUM_FEATURES = len(FEATURE_NAMES)
@@ -281,7 +391,7 @@ def extract_features(url: str, meta: Optional[dict] = None) -> np.ndarray:
 
     # --- Suspicious patterns (31-39) ---
     apex = (ext.domain or "").lower()
-    if apex and apex in TRUSTED_APEX:
+    if is_trusted_apex(url):
         # Official brand/popular site: keywords and brand-impersonation are NOT
         # suspicious here (e.g. https://www.paypal.com/login is legitimate).
         features[31] = 0.0
@@ -301,5 +411,8 @@ def extract_features(url: str, meta: Optional[dict] = None) -> np.ndarray:
     features[40] = float(meta.get("domain_age_days", -1))
     features[41] = float(meta.get("prior_score", 0))
     features[42] = float(meta.get("prior_checker_count", 0))
+
+    # --- Typosquat similarity (43) ---
+    features[43] = _brand_typosquat_min_distance((ext.domain or "").lower(), apex)
 
     return features

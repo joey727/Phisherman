@@ -13,10 +13,13 @@ from typing import Optional
 
 import numpy as np
 import joblib
-import tldextract
 
-from .features import extract_features, FEATURE_NAMES, NUM_FEATURES, TRUSTED_APEX
-
+from .features import (
+    extract_features,
+    FEATURE_NAMES,
+    NUM_FEATURES,
+    is_trusted_apex,
+)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -62,28 +65,16 @@ def load_model() -> bool:
         _model = joblib.load(model_path)
         _model_loaded = True
         logger.info(f"Model loaded successfully from {model_path}")
-        return True
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         _model_loaded = False
         return False
 
-
-def is_model_loaded() -> bool:
     return _model_loaded
 
 
-def is_trusted_apex(url: str) -> bool:
-    """True if the URL's effective apex (eTLD+1) is an official brand/popular site.
-
-    Phishing impersonators almost never obtain the real brand apex (attacker apexes
-    differ, e.g. paypal-secure-verify.tk), so a trusted apex is treated as benign.
-    """
-    try:
-        ext = tldextract.extract(url)
-        return bool(ext.domain and ext.domain.lower() in TRUSTED_APEX)
-    except Exception:
-        return False
+def is_model_loaded() -> bool:
+    return _model_loaded
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +207,11 @@ def predict(url: str, meta: Optional[dict] = None) -> dict:
             "top_features": [],
             "inference_time_ms": round((time.perf_counter() - start) * 1000, 2),
         }
+
+    # Enrichment meta: caller-provided domain age feeds the reserved feature
+    # (index 40), which is a dead constant at training time (always -1) and is
+    # ignored by the model. No RDAP/network calls in the hot path.
+    meta = dict(meta or {})
 
     features = extract_features(url, meta)
 
