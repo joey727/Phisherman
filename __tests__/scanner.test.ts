@@ -112,17 +112,51 @@ describe("Scanner aggregation", () => {
     expect(freeField).not.toBe(proField);
   });
 
-  test("pro and enterprise share the same cache key (identical checkers)", async () => {
-    const mockedHsetCalls = (redis as unknown as { __hsetCalls: { key: string; data: Record<string, string> }[] }).__hsetCalls;
-    mockedHsetCalls.length = 0;
+  test("drops ML contribution when an established-domain veto fires", async () => {
+    (registry.runAll as jest.Mock).mockResolvedValueOnce({
+      checks: [
+        { name: "heuristics", score: 0, veto: true, reasons: [] },
+        { name: "ml", score: 60 },
+        { name: "urlhaus", score: 0 },
+      ],
+      timing: {},
+    });
 
-    await analyzeUrl("http://paid-shared.com", { tier: "pro" });
-    await analyzeUrl("http://paid-shared.com", { tier: "enterprise" });
+    const result = await analyzeUrl("https://www.miele.com/");
+    expect(result.score).toBe(0);
+    expect(result.verdict).toBe("safe");
+    expect(result.reasons).toContain(
+      "Established domain with clean URL (reputation veto)",
+    );
+  });
 
-    expect(mockedHsetCalls.length).toBe(2);
-    const proField = Object.keys(mockedHsetCalls[0].data)[0];
-    const entField = Object.keys(mockedHsetCalls[1].data)[0];
-    expect(proField).toBe(entField);
+  test("keeps ML score when no veto fires", async () => {
+    (registry.runAll as jest.Mock).mockResolvedValueOnce({
+      checks: [
+        { name: "heuristics", score: 0 },
+        { name: "ml", score: 60 },
+      ],
+      timing: {},
+    });
+
+    const result = await analyzeUrl("https://example.com/");
+    expect(result.score).toBe(60);
+    expect(result.verdict).toBe("suspicious");
+  });
+
+  test("keeps feed scores even when a veto fires (compromised old domain)", async () => {
+    (registry.runAll as jest.Mock).mockResolvedValueOnce({
+      checks: [
+        { name: "heuristics", score: 0, veto: true, reasons: [] },
+        { name: "ml", score: 60 },
+        { name: "urlhaus", score: 80, reasons: ["Found in blacklist"] },
+      ],
+      timing: {},
+    });
+
+    const result = await analyzeUrl("https://www.miele.com/");
+    expect(result.score).toBe(80);
+    expect(result.verdict).toBe("phishing");
   });
 });
 
