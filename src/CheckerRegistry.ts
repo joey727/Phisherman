@@ -37,7 +37,7 @@ class CheckerRegistry {
 
           const result = await Promise.race([checkPromise, timeoutPromise]);
           timing[checker.name] = Date.now() - start;
-          return result;
+          return { ...result, name: checker.name };
         } catch (err: any) {
           timing[checker.name] = Date.now() - start;
           if (err.message === "Timeout") {

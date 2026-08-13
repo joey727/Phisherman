@@ -2,6 +2,14 @@ export interface CheckResult {
     score: number;
     reason?: string;
     reasons?: string[];
+    /** Checker that produced this result (set by CheckerRegistry.runAll). */
+    name?: string;
+    /**
+     * Established-domain veto: set by a checker when the URL's registered domain
+     * is established (whois age >= 365d) and the URL is lexically clean. When any
+     * check vetoes, analyzeUrl drops the ML checker's score contribution.
+     */
+    veto?: boolean;
 }
 
 export interface ParsedUrl {

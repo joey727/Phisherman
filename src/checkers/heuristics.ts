@@ -8,6 +8,143 @@ import { Checker, CheckResult, ParsedUrl } from "../types";
 const WHOIS_CACHE_TTL = 86400 * 1000; // 24 hours in ms
 const KEY_WHOIS_DATA = "whois_data";
 const KEY_WHOIS_EXPIRY = "whois_expiry";
+const KEY_RDAP_DATA = "rdap_data";
+const KEY_RDAP_EXPIRY = "rdap_expiry";
+const RDAP_TIMEOUT_MS = 2500;
+
+// ---------------------------------------------------------------------------
+// Established-domain veto
+//
+// A domain is treated as established-and-benign when it has been registered for
+// >= 365 days (from whois, with an RDAP fallback) AND the URL is lexically
+// clean. The reputation signal (age) lives in this rule layer instead of as an
+// ML feature, so the classifier can stay purely lexical and no popularity list
+// / RDAP crawl is needed. This covers ALL established legitimate domains,
+// including long-tail brands the model has never seen (miele.com,
+// leica-camera.com, ...).
+//
+// The lists below are duplicated from ml-service/app/features.py, which is the
+// authoritative source. Keep them in sync: the pipeline's long-tail promotion
+// gate and the heuristics veto Jest test both guard against drift.
+// ---------------------------------------------------------------------------
+
+const SUSPICIOUS_TLDS = new Set([
+  "tk", "ml", "cf", "ga", "gq", "top", "xyz", "buzz", "club", "online",
+  "site", "icu", "work", "info", "su", "pw", "cc", "ws",
+]);
+
+const BRAND_KEYWORDS = [
+  "paypal", "apple", "google", "microsoft", "amazon", "netflix", "facebook",
+  "instagram", "whatsapp", "chase", "wellsfargo", "bankofamerica", "citi",
+  "usps", "dhl", "fedex", "ups", "dropbox", "linkedin", "twitter", "ebay",
+  "yahoo", "outlook", "office365", "icloud", "coinbase", "binance",
+];
+
+const SUSPICIOUS_KEYWORDS = [
+  "verify", "update", "secure", "login", "support", "account", "confirm",
+  "suspend", "alert", "urgent", "expire", "unlock", "validate", "password",
+  "credential", "signin", "billing", "invoice", "refund", "reward",
+];
+
+const SHORTENER_DOMAINS = [
+  "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly",
+  "rebrand.ly", "cutt.ly", "shorturl.at", "tiny.cc", "lnkd.in", "rb.gy",
+];
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasWordBoundary(haystack: string, needle: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(needle)}\\b`).test(haystack);
+}
+
+// whois-json uses raw TCP sockets and is unreliable for some registries
+// (Verisign timeouts, .tools routing to IANA, empty results). RDAP is a
+// structured HTTPS fallback used ONLY when whois yields no creation date.
+// rdap.org covers most TLDs; Identity Digital serves TLDs missing from the
+// IANA bootstrap (e.g. .io), so it is tried second.
+const RDAP_BASES = [
+  "https://rdap.org/domain/",
+  "https://rdap.identitydigital.services/rdap/domain/",
+];
+const RDAP_INPROC_NULL_TTL = 15 * 60 * 1000;
+
+// in-process negative cache only lasts 15 minutes so a transient RDAP failure
+// does not block a domain for hours; successful dates live as long as whois.
+const rdapCache = new Map<string, { date: string | null; ts: number }>();
+
+async function fetchRdapDate(domain: string): Promise<string | null> {
+  for (const base of RDAP_BASES) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), RDAP_TIMEOUT_MS);
+      try {
+        const resp = await fetch(base + encodeURIComponent(domain), {
+          signal: controller.signal,
+          redirect: "follow",
+          headers: { accept: "application/rdap+json" },
+        });
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const events: Array<{ eventAction?: string; eventDate?: string }> =
+            data?.events ?? [];
+          const registration = events.find(
+            (e) => e.eventAction === "registration",
+          );
+          const date = registration?.eventDate ?? null;
+          if (date) return date;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      /* try the next base */
+    }
+  }
+  return null;
+}
+
+async function rdapCreationDate(domain: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = rdapCache.get(domain);
+  if (cached) {
+    const ttl = cached.date ? WHOIS_CACHE_TTL : RDAP_INPROC_NULL_TTL;
+    if (now - cached.ts < ttl) return cached.date;
+  }
+
+  try {
+    const raw = await redis.hget(KEY_RDAP_DATA, domain);
+    if (raw) {
+      const parsed = JSON.parse(raw as string);
+      const date = parsed?.date ?? null;
+      // Only non-null dates are trusted from Redis; transient failures must
+      // not poison the cache for 24 hours.
+      if (date) {
+        rdapCache.set(domain, { date, ts: now });
+        return date;
+      }
+    }
+  } catch {
+    /* redis unavailable -- fall through to live lookup */
+  }
+
+  const date = await fetchRdapDate(domain);
+
+  if (date) {
+    try {
+      await redis.hset(KEY_RDAP_DATA, { [domain]: JSON.stringify({ date }) });
+      await redis.zadd(KEY_RDAP_EXPIRY, {
+        score: Date.now() + WHOIS_CACHE_TTL,
+        member: domain,
+      });
+    } catch {
+      /* cache write failures are non-fatal */
+    }
+  }
+  rdapCache.set(domain, { date, ts: Date.now() });
+  return date;
+}
 
 async function whoisCheck(regDomain: string, hostname: string) {
   const reasons: string[] = [];
@@ -16,10 +153,10 @@ async function whoisCheck(regDomain: string, hostname: string) {
 
   const lookupKey = regDomain || hostname;
 
+  let whoisInfo: any;
   try {
     // Try cache first (Hash)
     const cached = await redis.hget(KEY_WHOIS_DATA, lookupKey);
-    let whoisInfo: any;
 
     if (cached) {
       whoisInfo = JSON.parse(cached as string);
@@ -47,36 +184,44 @@ async function whoisCheck(regDomain: string, hostname: string) {
         if (timer) clearTimeout(timer);
       }
     }
-
-    details.whois = {
-      registrar: whoisInfo.registrar || whoisInfo["Registrar"],
-      creationDate:
-        whoisInfo.creationDate ||
-        whoisInfo.createdDate ||
-        whoisInfo["Creation Date"],
-      updatedDate: whoisInfo.updatedDate || whoisInfo.updated,
-      raw: undefined,
-    };
-
-    const cd = details.whois.creationDate
-      ? new Date(details.whois.creationDate)
-      : null;
-    if (cd) {
-      const ageDays = Math.floor(
-        (Date.now() - cd.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      details.domainAgeDays = ageDays;
-      if (ageDays < 90) {
-        scoreDelta += 10;
-        reasons.push("Domain is recently created (<90 days)");
-      } else if (ageDays < 365) {
-        scoreDelta += 4;
-      } else {
-        scoreDelta -= 2;
-      }
-    }
   } catch (err) {
     details.whoisError = String(err);
+  }
+
+  details.whois = {
+    registrar: whoisInfo?.registrar || whoisInfo?.["Registrar"],
+    creationDate:
+      whoisInfo?.creationDate ||
+      whoisInfo?.createdDate ||
+      whoisInfo?.["Creation Date"],
+    updatedDate: whoisInfo?.updatedDate || whoisInfo?.updated,
+    raw: undefined,
+  };
+
+  let creationDate: string | null = details.whois.creationDate ?? null;
+  if (!creationDate) {
+    // whois failed to yield a creation date -- fall back to RDAP (cached)
+    creationDate = await rdapCreationDate(lookupKey);
+    if (creationDate) {
+      details.whois.creationDate = creationDate;
+      details.whois.source = "rdap";
+    }
+  }
+
+  const cd = creationDate ? new Date(creationDate) : null;
+  if (cd && !isNaN(cd.getTime())) {
+    const ageDays = Math.floor(
+      (Date.now() - cd.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    details.domainAgeDays = ageDays;
+    if (ageDays < 90) {
+      scoreDelta += 10;
+      reasons.push("Domain is recently created (<90 days)");
+    } else if (ageDays < 365) {
+      scoreDelta += 4;
+    } else {
+      scoreDelta -= 2;
+    }
   }
 
   return { scoreDelta, reasons, details };
@@ -173,8 +318,10 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
   }
 
   // DNS resolution
+  let dnsResolved = false;
   try {
     await safeResolveHost(hostname);
+    dnsResolved = true;
   } catch {
     score += 25;
     reasons.push("DNS failed or private network");
@@ -187,7 +334,28 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
 
   score = Math.max(0, score);
 
-  return { score, reasons };
+  // Established-domain veto: an old registered domain + a lexically clean URL is
+  // a safe-looking URL regardless of what the lexical ML model thinks. Attackers
+  // register fresh domains, so the age rule already excludes their URLS; feed
+  // checkers (URLHaus, PhishTank, SafeBrowsing, VT) still run and can override.
+  const ageDays = whoisResult.details.domainAgeDays;
+  const urlLower = url.toLowerCase();
+  const apex = domainInfo.domain || "";
+  const veto =
+    typeof ageDays === "number" &&
+    ageDays >= 365 &&
+    dnsResolved &&
+    protocol === "https:" &&
+    !(domainInfo.publicSuffix && SUSPICIOUS_TLDS.has(domainInfo.publicSuffix)) &&
+    !hostname.includes("xn--") &&
+    !url.includes("@") &&
+    !urlLower.startsWith("data:text/html") &&
+    !SHORTENER_DOMAINS.some((s) => hostname.endsWith(s)) &&
+    parts.length <= 4 &&
+    !BRAND_KEYWORDS.some((b) => b !== apex && hasWordBoundary(urlLower, b)) &&
+    !SUSPICIOUS_KEYWORDS.some((k) => hasWordBoundary(urlLower, k));
+
+  return { score, reasons, veto };
 }
 
 export const HeuristicsChecker: Checker = {

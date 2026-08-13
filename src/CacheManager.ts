@@ -90,19 +90,30 @@ class CacheManager {
     async cleanupWhois() {
         const KEY_WHOIS_DATA = "whois_data";
         const KEY_WHOIS_EXPIRY = "whois_expiry";
+        const KEY_RDAP_DATA = "rdap_data";
+        const KEY_RDAP_EXPIRY = "rdap_expiry";
 
         try {
             const now = Date.now();
             // Get expired domains (score <= now)
             const expired = await redis.zrange(KEY_WHOIS_EXPIRY, 0, now, { byScore: true });
+            const expiredRdap = await redis.zrange(KEY_RDAP_EXPIRY, 0, now, { byScore: true });
 
-            if (expired.length > 0) {
-                console.log(`CacheManager: Cleaning up ${expired.length} expired WHOIS entries...`);
+            if (expired.length > 0 || expiredRdap.length > 0) {
+                console.log(
+                    `CacheManager: Cleaning up ${expired.length} expired WHOIS entries and ${expiredRdap.length} expired RDAP entries...`,
+                );
                 const pipe = redis.pipeline();
-                pipe.hdel(KEY_WHOIS_DATA, ...expired as string[]);
-                pipe.zrem(KEY_WHOIS_EXPIRY, ...expired);
+                if (expired.length > 0) {
+                    pipe.hdel(KEY_WHOIS_DATA, ...expired as string[]);
+                    pipe.zrem(KEY_WHOIS_EXPIRY, ...expired);
+                }
+                if (expiredRdap.length > 0) {
+                    pipe.hdel(KEY_RDAP_DATA, ...expiredRdap as string[]);
+                    pipe.zrem(KEY_RDAP_EXPIRY, ...expiredRdap);
+                }
                 await pipe.exec();
-                console.log("CacheManager: WHOIS cleanup complete.");
+                console.log("CacheManager: WHOIS/RDAP cleanup complete.");
             }
         } catch (err) {
             console.error("CacheManager: WHOIS cleanup failed:", err);

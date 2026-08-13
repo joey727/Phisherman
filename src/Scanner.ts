@@ -117,6 +117,18 @@ export async function analyzeUrl(
 
   const { checks, timing } = await registry.runAll(url, parsedUrl, { tier });
 
+  const vetoed = checks.some((c) => c.veto === true);
+
+  // Established-domain veto: an established (whois age >= 365d) lexically clean
+  // URL is safe-looking regardless of the lexical ML model, so drop the ML
+  // checker's contribution. Feed/threat checkers keep their scores — a genuinely
+  // compromised old domain hosting a phish page is still flagged by them.
+  if (vetoed) {
+    for (const c of checks) {
+      if (c.name === "ml") c.score = 0;
+    }
+  }
+
   const totalScore = Math.min(
     100,
     checks.reduce((a, c) => a + c.score, 0),
@@ -149,6 +161,10 @@ export async function analyzeUrl(
         threatType = threatType && threatType !== "phishing" ? "mixed" : "phishing";
       }
     }
+  }
+
+  if (vetoed) {
+    allReasons.push("Established domain with clean URL (reputation veto)");
   }
 
   const result: ScanResult = {
