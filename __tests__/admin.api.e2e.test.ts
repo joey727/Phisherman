@@ -23,22 +23,32 @@ jest.mock("../src/utils/redis", () => {
 
   return {
     __esModule: true,
-    resetStores: () => { store.clear(); zset.clear(); },
+    resetStores: () => {
+      store.clear();
+      zset.clear();
+    },
     default: {
-      hset: jest.fn(async (key: string, data: Record<string, string> | string, ...rest: any[]) => {
-        if (typeof data === "object") {
-          writeHset(key, data);
-          return Object.keys(data).length;
-        }
-        const args = [data, ...rest] as string[];
-        if (!store.has(key)) store.set(key, new Map());
-        const map = store.get(key);
-        for (let i = 0; i < args.length; i += 2) map.set(args[i], String(args[i + 1]));
-        return args.length / 2;
-      }),
+      hset: jest.fn(
+        async (
+          key: string,
+          data: Record<string, string> | string,
+          ...rest: any[]
+        ) => {
+          if (typeof data === "object") {
+            writeHset(key, data);
+            return Object.keys(data).length;
+          }
+          const args = [data, ...rest] as string[];
+          if (!store.has(key)) store.set(key, new Map());
+          const map = store.get(key);
+          for (let i = 0; i < args.length; i += 2)
+            map.set(args[i], String(args[i + 1]));
+          return args.length / 2;
+        },
+      ),
       hget: jest.fn(async (key: string, field: string) => {
         const map = store.get(key);
-        return map ? map.get(field) ?? null : null;
+        return map ? (map.get(field) ?? null) : null;
       }),
       hgetall: jest.fn(async (key: string) => {
         const map = store.get(key);
@@ -57,7 +67,11 @@ jest.mock("../src/utils/redis", () => {
       zadd: jest.fn(async (key: string, ...args: any[]) => {
         if (!zset.has(key)) zset.set(key, new Map());
         const map = zset.get(key)!;
-        if (args.length === 1 && typeof args[0] === "object" && args[0] !== null) {
+        if (
+          args.length === 1 &&
+          typeof args[0] === "object" &&
+          args[0] !== null
+        ) {
           const { score, member } = args[0];
           map.set(member, score);
           return 1;
@@ -116,7 +130,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  const mockRedis = jest.requireMock("../src/utils/redis") as { resetStores: () => void };
+  const mockRedis = jest.requireMock("../src/utils/redis") as {
+    resetStores: () => void;
+  };
   mockRedis.resetStores();
 });
 
@@ -226,7 +242,10 @@ describe("Admin API Key Management Endpoints", () => {
   describe("GET /admin/keys/:hash", () => {
     it("returns details for a specific key", async () => {
       const { createApiKey } = require("../src/utils/apiKeys");
-      const { apiKey, metadata } = await createApiKey("specific-key", "enterprise");
+      const { apiKey, metadata } = await createApiKey(
+        "specific-key",
+        "enterprise",
+      );
       const hash = hashApiKey(apiKey);
 
       const res = await request(app)
