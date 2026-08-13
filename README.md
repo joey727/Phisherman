@@ -66,10 +66,11 @@ Hardened protections against server-side request forgery (SSRF) and DNS rebindin
 
 ### Machine-Learning Detection
 
-An optional XGBoost classifier runs in a separate `ml-service` (FastAPI) and adds a 41-feature signal on top of the rule-based checkers:
-- Feature vector covers URL length and entropy, hostname/digit/TLD properties, suspicious keywords, brand-impersonation patterns, and domain age.
+An optional XGBoost classifier runs in a separate `ml-service` (FastAPI) and adds a 44-feature lexical signal on top of the rule-based checkers:
+- Feature vector covers URL length and entropy, hostname/digit/TLD properties, suspicious keywords, brand-impersonation patterns, and typosquat similarity. It is purely lexical — no reputation features, popularity lists, or external lookups at inference time.
 - The Node app calls `POST {ML_SERVICE_URL}/predict` via `src/utils/ml.ts`; results surface as `ML:` reasons. If the service is unreachable the scanner degrades to local heuristics.
 - **Trusted-apex guard:** URLs hosted on an official brand/popular apex (`TRUSTED_APEX` in `ml-service/app/features.py`) are treated as benign — brand-impersonation and suspicious-keyword features are suppressed and `predict()` short-circuits to a safe verdict. Phishing lookalikes live on *different* apexes (`paypal-secure-verify.tk`), so they are unaffected: `https://www.paypal.com/signin` scores 0 while `http://paypal-secure-verify.tk/login/account.php` scores 100.
+- **Established-domain veto:** reputation lives in the rule layer, not the model. A domain registered for >= 365 days (`whois`, with a cached RDAP fallback) with a lexically clean URL is treated as safe regardless of the raw lexical score. This rescues long-tail legitimate brands the model has never seen (e.g. `miele.com`, `firehydrant.io`) that the lexical model over-scores, while attackers' freshly-registered domains never qualify. See `src/checkers/heuristics.ts`.
 
 ### Caching Architecture
 
@@ -380,7 +381,7 @@ ml-service/             # ML classification service (FastAPI + XGBoost)
   app/
     main.py             # FastAPI app: /predict, /health, /ping, /invocations
     model.py            # Model loading, inference, trusted-apex guard, fallback
-    features.py         # 41-feature extraction + TRUSTED_APEX
+    features.py         # 44-feature extraction + TRUSTED_APEX
     schemas.py          # Request/response models
   training/
     pipeline.py         # Feed ingestion, training, safe-promotion gate
