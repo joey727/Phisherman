@@ -9,6 +9,11 @@ import axios from "axios";
 const CIRCUIT_BREAKER_THRESHOLD = 5; // failures before opening
 const CIRCUIT_BREAKER_RESET_MS = 30_000; // 30s before half-open retry
 const ML_TIMEOUT_MS = 2000; // 2s max for ML call
+// Max points a single ML prediction may contribute to the total scan score.
+// Prevents one mis-calibrated checker from alone forcing a "phishing" (>=70)
+// verdict: ML can push a URL to "suspicious" (>=40) but reaching "phishing"
+// requires >=10 more points of corroboration from other checkers.
+const ML_MAX_SCORE = Number(process.env.ML_MAX_SCORE ?? 60);
 
 let circuitFailures = 0;
 let circuitOpenedAt = 0;
@@ -166,7 +171,7 @@ export async function scoreUrlMl(
       }
 
       return {
-        score: Math.max(0, Math.min(100, data.score ?? 0)),
+        score: Math.max(0, Math.min(ML_MAX_SCORE, data.score ?? 0)),
         reasons,
       };
     } catch (err: any) {
@@ -177,5 +182,9 @@ export async function scoreUrlMl(
   }
 
   // Fallback to local heuristic scoring
-  return localFallbackScore(url, meta);
+  const fallback = localFallbackScore(url, meta);
+  return {
+    ...fallback,
+    score: Math.min(fallback.score, ML_MAX_SCORE),
+  };
 }
