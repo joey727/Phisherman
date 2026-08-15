@@ -14,15 +14,21 @@ class CheckerRegistry {
   async runAll(
     url: string,
     parsed?: ParsedUrl,
-    opts?: { tier?: ApiKeyTier },
+    opts?: { tier?: ApiKeyTier; enableMl?: boolean },
   ): Promise<{ checks: CheckResult[]; timing: Record<string, number> }> {
     const timing: Record<string, number> = {};
     const TIMEOUT_MS = 2500; // 2.5s maximum per checker
     const tier = opts?.tier ?? "free";
+    const enableMl = opts?.enableMl ?? false;
+    const premiumTier = tier === "pro" || tier === "enterprise";
 
+    // Anonymous and quota-degraded requests only get the free-tier checker set
+    // (heuristics + feeds, no ML). ML checkers run only for authenticated
+    // requests within their quota; pro-gated checkers additionally require pro/enterprise.
     const eligible = this.checkers.filter((checker) => {
-      if (!checker.minTier || checker.minTier === "free") return true;
-      return tier === "pro" || tier === "enterprise";
+      if (checker.minTier === "ml") return enableMl;
+      if (checker.minTier === "pro") return enableMl && premiumTier;
+      return true;
     });
 
     const checks = await Promise.all(

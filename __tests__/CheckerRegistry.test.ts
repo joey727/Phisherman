@@ -63,10 +63,44 @@ describe("CheckerRegistry", () => {
         registry.register(freeChecker);
         registry.register(premiumChecker);
 
-        const { checks } = await registry.runAll("test.com", undefined, { tier: "free" });
+        const { checks } = await registry.runAll("test.com", undefined, { tier: "free", enableMl: true });
 
         expect(checks).toHaveLength(1);
         expect(checks[0].score).toBe(10);
+    });
+
+    test("excludes premium checkers when ML is not enabled, even for pro tier", async () => {
+        const freeChecker: Checker = {
+            name: "free-c",
+            check: jest.fn().mockResolvedValue({ score: 10 }),
+        };
+        const premiumChecker: Checker = {
+            name: "premium-c",
+            check: jest.fn().mockResolvedValue({ score: 50 }),
+            minTier: "pro",
+        };
+        registry.register(freeChecker);
+        registry.register(premiumChecker);
+
+        const { checks } = await registry.runAll("test.com", undefined, { tier: "pro", enableMl: false });
+
+        expect(checks).toHaveLength(1);
+        expect(checks[0].score).toBe(10);
+    });
+
+    test("runs ml-gated checkers for free tier when enableMl is true", async () => {
+        const mlChecker: Checker = {
+            name: "ml-c",
+            check: jest.fn().mockResolvedValue({ score: 50 }),
+            minTier: "ml",
+        };
+        registry.register(mlChecker);
+
+        const within = await registry.runAll("test.com", undefined, { tier: "free", enableMl: true });
+        expect(within.checks).toHaveLength(1);
+
+        const degraded = await registry.runAll("test.com", undefined, { tier: "free", enableMl: false });
+        expect(degraded.checks).toHaveLength(0);
     });
 
     test("includes premium checkers for pro tier", async () => {
@@ -82,7 +116,7 @@ describe("CheckerRegistry", () => {
         registry.register(freeChecker);
         registry.register(premiumChecker);
 
-        const { checks } = await registry.runAll("test.com", undefined, { tier: "pro" });
+        const { checks } = await registry.runAll("test.com", undefined, { tier: "pro", enableMl: true });
 
         expect(checks).toHaveLength(2);
     });
@@ -95,7 +129,7 @@ describe("CheckerRegistry", () => {
         };
         registry.register(premiumChecker);
 
-        const { checks } = await registry.runAll("test.com", undefined, { tier: "enterprise" });
+        const { checks } = await registry.runAll("test.com", undefined, { tier: "enterprise", enableMl: true });
 
         expect(checks).toHaveLength(1);
     });

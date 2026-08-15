@@ -84,7 +84,12 @@ export function createApp() {
 
     try {
       const tier = req.apiKey?.tier ?? "free";
-      const result = await analyzeUrl(url, { tier });
+      const enableMl = Boolean(req.apiKey) && !req.degradedQuota;
+      const result = await analyzeUrl(url, {
+        tier,
+        enableMl,
+        degraded: Boolean(req.degradedQuota),
+      });
       return res.json(result);
     } catch (err) {
       console.error("analyze error:", err);

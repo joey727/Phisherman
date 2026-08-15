@@ -63,14 +63,14 @@ async function logScanFeedback(url: string, result: ScanResult) {
   }
 }
 
-function cacheProfile(tier: ApiKeyTier): string {
-  return tier === "free" ? "free" : "premium";
+function cacheProfile(enableMl: boolean): string {
+  return enableMl ? "premium" : "free";
 }
 
-function scanCacheId(url: string, tier: ApiKeyTier) {
+function scanCacheId(url: string, enableMl: boolean) {
   return crypto
     .createHash("sha256")
-    .update(`${cacheProfile(tier)}:${url}`)
+    .update(`${cacheProfile(enableMl)}:${url}`)
     .digest("hex");
 }
 
@@ -90,10 +90,15 @@ function parseUrl(url: string): ParsedUrl | undefined {
 
 export async function analyzeUrl(
   url: string,
-  opts?: { tier?: ApiKeyTier },
+  opts?: { tier?: ApiKeyTier; enableMl?: boolean; degraded?: boolean },
 ): Promise<ScanResult> {
   const tier = opts?.tier ?? "free";
-  const id = scanCacheId(url, tier);
+  const enableMl =
+    opts?.enableMl ?? (tier === "pro" || tier === "enterprise");
+  // Set when an authenticated key exhausted its quota and the scan was served
+  // without ML/pro enhancements. Anonymous requests are never flagged.
+  const degraded = Boolean(opts?.degraded);
+  const id = scanCacheId(url, enableMl);
 
   try {
     const cached = await redis.hget(SCAN_CACHE_HASH, id);
@@ -115,7 +120,10 @@ export async function analyzeUrl(
   // Parse URL once upfront and pass to all checkers
   const parsedUrl = parseUrl(url);
 
-  const { checks, timing } = await registry.runAll(url, parsedUrl, { tier });
+  const { checks, timing } = await registry.runAll(url, parsedUrl, {
+    tier,
+    enableMl,
+  });
 
   const vetoed = checks.some((c) => c.veto === true);
 
@@ -175,6 +183,7 @@ export async function analyzeUrl(
     reasons: allReasons,
     executionTimeMs: timing,
     tier,
+    degraded,
   };
 
   try {

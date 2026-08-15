@@ -77,39 +77,51 @@ describe("Scanner aggregation", () => {
     expect(result.verdict).toBe("phishing");
   });
 
-  test("defaults to free tier and returns tier in the result", async () => {
+  test("defaults to free tier without ML and returns tier in the result", async () => {
     const result = await analyzeUrl("http://bad-site.com");
 
     expect(result.tier).toBe("free");
+    expect(result.degraded).toBe(false);
     expect(registry.runAll).toHaveBeenCalledWith(
       "http://bad-site.com",
       expect.anything(),
-      { tier: "free" },
+      { tier: "free", enableMl: false },
     );
   });
 
-  test("passes an explicit tier into the registry and result", async () => {
-    const result = await analyzeUrl("http://bad-site.com", { tier: "pro" });
+  test("passes an explicit tier and enableMl into the registry and result", async () => {
+    const result = await analyzeUrl("http://bad-site.com", { tier: "pro", enableMl: true });
 
     expect(result.tier).toBe("pro");
     expect(registry.runAll).toHaveBeenCalledWith(
       "http://bad-site.com",
       expect.anything(),
-      { tier: "pro" },
+      { tier: "pro", enableMl: true },
     );
   });
 
-  test("uses tier-scoped cache keys so free/pro results never mix", async () => {
+  test("marks results degraded when the request was quota-degraded", async () => {
+    const result = await analyzeUrl("http://bad-site.com", { tier: "pro", enableMl: false, degraded: true });
+
+    expect(result.degraded).toBe(true);
+    expect(registry.runAll).toHaveBeenCalledWith(
+      "http://bad-site.com",
+      expect.anything(),
+      { tier: "pro", enableMl: false },
+    );
+  });
+
+  test("uses ML-scoped cache keys so degraded/anonymous results never mix", async () => {
     const mockedHsetCalls = (redis as unknown as { __hsetCalls: { key: string; data: Record<string, string> }[] }).__hsetCalls;
     mockedHsetCalls.length = 0;
 
-    await analyzeUrl("http://mix-test.com", { tier: "free" });
-    await analyzeUrl("http://mix-test.com", { tier: "pro" });
+    await analyzeUrl("http://mix-test.com", { tier: "free", enableMl: false });
+    await analyzeUrl("http://mix-test.com", { tier: "free", enableMl: true });
 
     expect(mockedHsetCalls.length).toBe(2);
     const freeField = Object.keys(mockedHsetCalls[0].data)[0];
-    const proField = Object.keys(mockedHsetCalls[1].data)[0];
-    expect(freeField).not.toBe(proField);
+    const mlField = Object.keys(mockedHsetCalls[1].data)[0];
+    expect(freeField).not.toBe(mlField);
   });
 
   test("drops ML contribution when an established-domain veto fires", async () => {

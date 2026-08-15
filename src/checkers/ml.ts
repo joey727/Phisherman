@@ -24,5 +24,5 @@ export async function mlCheck(
 export const MlChecker: Checker = {
   name: "ml",
   check: mlCheck,
-  minTier: "pro",
+  minTier: "ml",
 };
