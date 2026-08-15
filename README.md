@@ -81,9 +81,21 @@ All caching is centralized through Upstash Redis (HTTP-based), designed to minim
 - WHOIS data cached for 24 hours
 - All compound Redis operations use pipelines to minimize HTTP round-trips
 
-### Rate Limiting
+### Rate Limiting & Tiers
 
-IP-based rate limiting (100 requests per 15-minute window) applied to the scan endpoint. Uses pipelined Redis operations for minimal overhead.
+Anonymous requests (no API key) are **free**: they are served without a windowed
+quota (only a per-IP concurrent-request cap for server safety) and run the
+heuristics + threat-feed checker set — **no ML**.
+
+API keys gate the ML model via a per-window quota:
+- `free` keys: small quota (3/day) with ML included
+- `pro` keys: 50/day with ML + premium reputation checkers (Safe Browsing, VirusTotal)
+- `enterprise` keys: 100/day with ML + premium reputation checkers
+
+When an authenticated key exhausts its quota it is **not rejected**: the
+request degrades to the anonymous/free quality set (heuristics only, no ML) for
+the rest of the window, and the response includes `"degraded": true`. The quota
+resets each window. Uses pipelined Redis operations for minimal overhead.
 
 ---
 
