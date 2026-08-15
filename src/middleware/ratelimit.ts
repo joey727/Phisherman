@@ -54,7 +54,13 @@ export const apiLimiter = async (
   res.on("finish", cleanup);
   res.on("close", cleanup);
 
-  // 2. Rate limit via Redis
+  // 2. Anonymous (no API key) requests are free: no windowed quota. They still
+  // share the per-IP concurrent cap above to protect the server from floods.
+  if (!req.apiKey) {
+    return next();
+  }
+
+  // 3. Rate limit via Redis (authenticated keys only)
   const redisKey = `ratelimit:${identity}`;
 
   try {
@@ -66,11 +72,14 @@ export const apiLimiter = async (
     const requests = results[0] as number;
 
     if (requests > tierConfig.maxRequests) {
-      return res.status(429).json({
-        error: "Too many requests, please try again later.",
-        limit: tierConfig.maxRequests,
-        current: requests,
-      });
+      // Quota exhausted: don't reject — degrade this request to the free/
+      // anonymous quality set (heuristics only, no ML) for the rest of the
+      // window. The counter keeps counting so the key stays degraded.
+      req.degradedQuota = true;
+      res.setHeader("X-RateLimit-Limit", String(tierConfig.maxRequests));
+      res.setHeader("X-RateLimit-Remaining", "0");
+      res.setHeader("X-RateLimit-Reset", String(tierConfig.windowSeconds));
+      return next();
     }
 
     res.setHeader("X-RateLimit-Limit", String(tierConfig.maxRequests));

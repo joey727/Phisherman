@@ -22,7 +22,8 @@ export interface ParsedUrl {
 export interface Checker {
     name: string;
     check: (url: string, parsed?: ParsedUrl) => Promise<CheckResult>;
-    minTier?: "free" | "pro";
+    /** "ml" checkers only run when the request is authenticated and within its ML quota. */
+    minTier?: "free" | "pro" | "ml";
 }
 
 export interface ScanResult {
@@ -34,6 +35,8 @@ export interface ScanResult {
     mlConfidence?: number;
     executionTimeMs?: Record<string, number>;
     tier: ApiKeyTier;
+    /** True when an authenticated key exhausted its quota and the scan was served degraded (no ML). */
+    degraded?: boolean;
 }
 
 export type ApiKeyTier = "free" | "pro" | "enterprise";
@@ -60,6 +63,8 @@ declare global {
         interface Request {
             apiKey?: ApiKeyMetadata;
             isAdmin?: boolean;
+            /** Set by the rate limiter when an authenticated key exhausted its quota. */
+            degradedQuota?: boolean;
         }
     }
 }

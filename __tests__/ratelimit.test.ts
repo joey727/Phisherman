@@ -19,12 +19,14 @@ function mockReq(opts?: {
   apiKey?: ApiKeyMetadata;
   ip?: string;
 }): Request {
-  return {
+  const req = {
     apiKey: opts?.apiKey,
     ip: opts?.ip || "127.0.0.1",
     headers: {},
     socket: { remoteAddress: "127.0.0.1" },
   } as unknown as Request;
+  req.degradedQuota = false;
+  return req;
 }
 
 function mockRes(): Response {
@@ -42,16 +44,15 @@ describe("apiLimiter", () => {
     jest.clearAllMocks();
   });
 
-  it("uses IP-based rate limit key when no apiKey is present", async () => {
-    mockPipeline.exec.mockResolvedValue([1, 1]);
+  it("skips the windowed quota for anonymous requests (free, no rate limit)", async () => {
     const req = mockReq({ ip: "10.0.0.1" });
     const res = mockRes();
     const next: NextFunction = jest.fn();
 
     await apiLimiter(req, res, next);
 
-    expect(mockPipeline.incr).toHaveBeenCalledWith("ratelimit:10.0.0.1");
-    expect(mockPipeline.expire).toHaveBeenCalledWith("ratelimit:10.0.0.1", 86400);
+    expect(mockPipeline.incr).not.toHaveBeenCalled();
+    expect(mockPipeline.expire).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
   });
 
@@ -101,19 +102,7 @@ describe("apiLimiter", () => {
     expect(next).toHaveBeenCalled();
   });
 
-  it("returns 429 when rate limit is exceeded for anonymous", async () => {
-    mockPipeline.exec.mockResolvedValue([150, 1]);
-    const req = mockReq({ ip: "10.0.0.2" });
-    const res = mockRes();
-    const next: NextFunction = jest.fn();
-
-    await apiLimiter(req, res, next);
-
-    expect(res.status).toHaveBeenCalledWith(429);
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it("returns 429 when rate limit is exceeded for an api key", async () => {
+  it("degrades instead of 429 when quota is exceeded for an api key", async () => {
     mockPipeline.exec.mockResolvedValue([2000, 1]);
     const apiKey: ApiKeyMetadata = {
       hash: "overuser_hash",
@@ -130,8 +119,9 @@ describe("apiLimiter", () => {
 
     await apiLimiter(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(429);
-    expect(next).not.toHaveBeenCalled();
+    expect(req.degradedQuota).toBe(true);
+    expect(res.status).not.toHaveBeenCalledWith(429);
+    expect(next).toHaveBeenCalled();
   });
 
   it("calls next() when Redis errors occur (graceful degradation)", async () => {
@@ -153,9 +143,7 @@ describe("apiLimiter", () => {
 
     await apiLimiter(req, res, next);
 
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Limit", "1");
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Remaining", "0");
-    expect(res.setHeader).toHaveBeenCalledWith("X-RateLimit-Reset", "86400");
+    expect(res.setHeader).not.toHaveBeenCalledWith("X-RateLimit-Limit", "1");
     expect(next).toHaveBeenCalled();
   });
 
