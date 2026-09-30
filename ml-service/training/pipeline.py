@@ -23,6 +23,7 @@ present in the environment; an exported env or CI/Render injection always wins.
 """
 
 import gzip
+import csv
 import io
 import json
 import logging
@@ -56,6 +57,7 @@ from app.features import (  # noqa: E402
 )
 from training.train import (  # noqa: E402
     train_on_dataset,
+    build_classifier,
     generate_benign,
     generate_benign_docs,
     generate_phishing,
@@ -76,6 +78,15 @@ load_dotenv()
 
 USER_AGENT = "Phisherman-ml-pipeline/1.0"
 HTTP_TIMEOUT = httpx.Timeout(60.0)
+FEED_MIN_SAMPLES = {
+    "urlhaus": 100,
+    "phishtank": 100,
+    "openphish": 20,
+    "phishstats": 100,
+    "tranco": 1000,
+}
+MIN_VERIFIED_POSITIVES = 500
+_FETCH_STATUS: dict[str, dict] = {}
 
 # Fixed benchmark set used to compare candidates across runs. Balanced-ish.
 BENCHMARK_PHISHING = [
@@ -617,6 +628,42 @@ def _safe(fn, default):
         return default
 
 
+def _fetch_source(name: str, fn) -> list:
+    """Fetch and record source health so partial data cannot pass promotion."""
+    try:
+        rows = [url for url in fn() if _is_trainable_url(url)]
+        count = len(rows)
+        minimum = FEED_MIN_SAMPLES[name]
+        _FETCH_STATUS[name] = {
+            "ok": count >= minimum,
+            "sample_count": count,
+            "minimum_expected": minimum,
+            "error": None if count >= minimum else "below_minimum_sample_count",
+        }
+        if count < minimum:
+            logger.warning("%s returned %d samples; minimum expected is %d", name, count, minimum)
+        else:
+            logger.info("%s fetched %d samples", name, count)
+        return rows
+    except Exception as exc:  # noqa: BLE001
+        _FETCH_STATUS[name] = {
+            "ok": False,
+            "sample_count": 0,
+            "minimum_expected": FEED_MIN_SAMPLES[name],
+            "error": str(exc),
+        }
+        logger.warning("%s fetch failed: %s", name, exc)
+        return []
+
+
+def _is_trainable_url(value: str) -> bool:
+    try:
+        parsed = urlsplit((value or "").strip())
+        return parsed.scheme.lower() in ("http", "https") and bool(parsed.hostname)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _get_bytes(url: str) -> bytes:
     r = httpx.get(
         url, timeout=HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
@@ -628,12 +675,9 @@ def _get_bytes(url: str) -> bytes:
 def fetch_urlhaus() -> list:
     text = _get_bytes("https://urlhaus.abuse.ch/downloads/csv_online/").decode("utf-8", "replace")
     urls = []
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split('","')
-        if len(parts) >= 3:
-            urls.append(parts[2].replace('"', "").strip())
+    for row in csv.reader(line for line in text.splitlines() if line and not line.startswith("#")):
+        if len(row) >= 3 and row[2].strip().lower().startswith(("http://", "https://")):
+            urls.append(row[2].strip())
     return urls
 
 
@@ -641,14 +685,8 @@ def fetch_phishtank() -> list:
     raw = gzip.decompress(
         _get_bytes("https://data.phishtank.com/data/online-valid.csv.gz")
     ).decode("utf-8", "replace")
-    urls = []
-    for line in raw.splitlines():
-        if not line:
-            continue
-        parts = line.split(",")
-        if len(parts) >= 2:
-            urls.append(parts[1].strip())
-    return urls
+    rows = csv.DictReader(io.StringIO(raw))
+    return [row.get("url", "").strip() for row in rows if row.get("url", "").strip()]
 
 
 def fetch_openphish() -> list:
@@ -672,12 +710,11 @@ def fetch_tranco(top_n: int = 50000) -> list:
     name = zf.namelist()[0]
     text = zf.read(name).decode("utf-8", "replace")
     urls = []
-    for i, line in enumerate(text.splitlines()):
+    for i, row in enumerate(csv.reader(io.StringIO(text))):
         if i >= top_n:
             break
-        parts = line.split(",")
-        if len(parts) >= 2:
-            urls.append("https://" + parts[1].strip())
+        if len(row) >= 2 and row[1].strip():
+            urls.append("https://" + row[1].strip())
     return urls
 
 
@@ -875,17 +912,19 @@ def save_metrics(metrics: dict):
 # ---------------------------------------------------------------------------
 
 def build_dataset(small: bool):
+    _FETCH_STATUS.clear()
     if small:
         max_pos = max_neg = 1500
     else:
         max_pos = max_neg = 15000
 
-    pos_feed = _dedupe(
-        _safe(fetch_urlhaus, [])
-        + _safe(fetch_phishtank, [])
-        + _safe(fetch_openphish, [])
-        + _safe(fetch_phishstats, [])
-    )
+    feeds = {
+        "urlhaus": _fetch_source("urlhaus", fetch_urlhaus),
+        "phishtank": _fetch_source("phishtank", fetch_phishtank),
+        "openphish": _fetch_source("openphish", fetch_openphish),
+        "phishstats": _fetch_source("phishstats", fetch_phishstats),
+    }
+    pos_feed = _dedupe([u for rows in feeds.values() for u in rows])
     # Label hygiene: normalize + cap per-apex so the model learns generic
     # phishing structure, not the query-string artifacts of a few active domains.
     pos_feed = _dedupe_by_apex([_normalize_url(u) for u in pos_feed], max_per_apex=25)
@@ -893,9 +932,10 @@ def build_dataset(small: bool):
     pos_set = set(pos_feed)
 
     delayed_pos = [u for u in scan_log if _normalize_url(u) in pos_set]
-    delayed_neg = [u for u in scan_log if _normalize_url(u) not in pos_set]
+    # A scan URL missing from today's feeds is unlabeled; never train it as benign.
+    delayed_neg_count = 0
 
-    tranco = _safe(fetch_tranco, [])
+    tranco = _fetch_source("tranco", fetch_tranco)
     if not tranco:
         tranco = generate_benign(max_neg * 3)
 
@@ -911,16 +951,23 @@ def build_dataset(small: bool):
         + generate_benign(max_neg // 4)
         + generate_benign_docs(max_neg // 4)
     )
-    structural_benign = [u for u in structural_benign if u not in pos_set]
+    positive_apexes = {_apex_key(u) for u in pos_feed}
+    structural_benign = [
+        u for u in structural_benign
+        if _normalize_url(u) not in pos_set and _apex_key(u) not in positive_apexes
+    ]
 
     # Pad the remainder with broad real-world apex domains (Tranco).
-    tranco = [u for u in _dedupe(tranco) if u not in pos_set]
+    tranco = [
+        u for u in _dedupe(tranco)
+        if _normalize_url(u) not in pos_set and _apex_key(u) not in positive_apexes
+    ]
     pad_needed = max_neg - len(structural_benign)
     if pad_needed > 0:
         benign = _dedupe(structural_benign + tranco[:pad_needed])
     else:
         benign = structural_benign[:max_neg]
-    negatives = _dedupe(benign + delayed_neg)[:max_neg]
+    negatives = _dedupe(benign)[:max_neg]
 
     positives = _dedupe(HARD_NEGATIVE_PHISHING + pos_feed + delayed_pos)
     if not pos_feed and not delayed_pos:
@@ -938,15 +985,32 @@ def build_dataset(small: bool):
     y = np.array([1] * len(positives) + [0] * len(negatives), dtype=np.int32)
     logger.info("feature extraction: %d samples in %.1fs", len(y), time.time() - start)
 
+    valid_positive_sources = sum(
+        1 for name in feeds if _FETCH_STATUS.get(name, {}).get("ok")
+    )
     sources = {
         "feed_positives": len(pos_feed),
+        "feed_status": dict(_FETCH_STATUS),
+        "valid_positive_feed_count": valid_positive_sources,
+        "source_health_ok": (
+            valid_positive_sources >= 2
+            and len(pos_feed) >= MIN_VERIFIED_POSITIVES
+            and _FETCH_STATUS.get("tranco", {}).get("ok", False)
+        ),
+        "minimum_verified_positives": MIN_VERIFIED_POSITIVES,
+        "verified_positive_fraction": round(
+            len(pos_feed) / max(len(positives), 1), 4
+        ),
         "delayed_positives": len(delayed_pos),
-        "delayed_negatives": len(delayed_neg),
+        "unlabeled_scan_log_excluded": len(scan_log) - len(delayed_pos),
+        "delayed_negatives": delayed_neg_count,
         "benign_pool": len(benign),
         "train_positives": len(positives),
         "train_negatives": len(negatives),
     }
-    return X, y, sources
+    training_urls = positives + negatives
+    groups = [_apex_key(url) for url in training_urls]
+    return X, y, sources, groups
 
 
 # ---------------------------------------------------------------------------
@@ -955,12 +1019,12 @@ def build_dataset(small: bool):
 
 def run(small: bool = False) -> bool:
     logger.info("Building dataset (small=%s)...", small)
-    X, y, sources = build_dataset(small)
+    X, y, sources, groups = build_dataset(small)
     if len(y) < 500:
         logger.error("Dataset too small to train (%d samples). Aborting.", len(y))
         return False
 
-    model, holdout = train_on_dataset(X, y)
+    model, holdout = train_on_dataset(X, y, groups=groups)
     benchmark = evaluate_benchmark(model)
 
     last = load_metrics()
@@ -970,6 +1034,8 @@ def run(small: bool = False) -> bool:
     )
     new_f1 = benchmark["guarded"]["f1"]
     gates = {
+        "source_health_ok": sources["source_health_ok"],
+        "not_smoke_run": not small,
         "guarded_benign_fp_ok": (
             benchmark["guarded"]["fp"] == 0
             and benchmark["guarded_regression_fp"] == 0
@@ -990,6 +1056,27 @@ def run(small: bool = False) -> bool:
         "was_better_than": prev_f1,
         "data": sources,
     }
+
+    if all(gates.values()):
+        # Validation stays isolated; only after it passes do we train the
+        # deployable candidate on every eligible example, then rerun the
+        # deterministic regression benchmark against that exact artifact.
+        model = build_classifier()
+        model.fit(X, y)
+        benchmark = evaluate_benchmark(model)
+        new_f1 = benchmark["guarded"]["f1"]
+        gates.update({
+            "guarded_benign_fp_ok": (
+                benchmark["guarded"]["fp"] == 0
+                and benchmark["guarded_regression_fp"] == 0
+            ),
+            "raw_world_benign_ok": benchmark["raw"]["fp"] == 0,
+            "raw_phishing_recall_ok": benchmark["raw"]["recall"] >= MIN_RAW_PHISHING_RECALL,
+            "guarded_veto_ok": benchmark["guarded_veto_ok"],
+            "guarded_veto_benign_ok": benchmark["guarded_veto_benign_fp"] == 0,
+            "f1_not_regressed": prev_f1 is None or new_f1 >= prev_f1,
+        })
+        metrics.update({"benchmark": benchmark, "promotion_gates": gates})
 
     if all(gates.values()):
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
