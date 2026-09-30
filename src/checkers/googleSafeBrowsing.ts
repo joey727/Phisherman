@@ -8,7 +8,11 @@ dotenv.config();
 const CACHE_TTL = 3600; // 1 hour for valid results
 const ERROR_CACHE_TTL = 900; // 15 mins for errors (e.g. billing)
 
-export async function checkSafeBrowsing(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
+export async function checkSafeBrowsing(
+  url: string,
+  _parsed?: ParsedUrl,
+  signal?: AbortSignal,
+): Promise<CheckResult> {
   try {
     const cached = await gsbCache.get<CheckResult>(url);
     if (cached) return cached;
@@ -32,7 +36,8 @@ export async function checkSafeBrowsing(url: string, _parsed?: ParsedUrl): Promi
           threatEntryTypes: ["URL"],
           threatEntries: [{ url }],
         },
-      }
+      },
+      { signal },
     );
 
     let result: CheckResult = { score: 0 };
@@ -46,6 +51,7 @@ export async function checkSafeBrowsing(url: string, _parsed?: ParsedUrl): Promi
     await gsbCache.set(url, result, CACHE_TTL);
     return result;
   } catch (err: any) {
+    if (signal?.aborted) return { score: 0 };
     console.error("safe browsing error: ", err.response?.data || err.message);
     // Cache the error state for a shorter time to prevent retrying a broken service every scan
     await gsbCache.set(url, { score: 0 }, ERROR_CACHE_TTL);

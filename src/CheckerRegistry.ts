@@ -34,11 +34,15 @@ class CheckerRegistry {
     const checks = await Promise.all(
       eligible.map(async (checker) => {
         const start = Date.now();
+        const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          const checkPromise = checker.check(url, parsed);
+          const checkPromise = checker.check(url, parsed, controller.signal);
           const timeoutPromise = new Promise<CheckResult>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Timeout")), TIMEOUT_MS);
+            timer = setTimeout(() => {
+              reject(new Error("Timeout"));
+              controller.abort();
+            }, TIMEOUT_MS);
           });
 
           const result = await Promise.race([checkPromise, timeoutPromise]);
@@ -46,7 +50,8 @@ class CheckerRegistry {
           return { ...result, name: checker.name };
         } catch (err: any) {
           timing[checker.name] = Date.now() - start;
-          if (err.message === "Timeout") {
+          if (err.message === "Timeout" || controller.signal.aborted) {
+            controller.abort();
             console.warn(`Checker ${checker.name} timed out for ${url}`);
             return { score: 0, reason: `Checker ${checker.name} timed out` };
           }

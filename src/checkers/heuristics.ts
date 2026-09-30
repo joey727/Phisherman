@@ -78,7 +78,8 @@ const RDAP_INPROC_NULL_TTL = 15 * 60 * 1000;
 // does not block a domain for hours; successful dates live as long as whois.
 const rdapCache = new Map<string, { date: string | null; ts: number }>();
 
-async function fetchRdapDate(domain: string): Promise<string | null> {
+async function fetchRdapDate(domain: string, signal?: AbortSignal): Promise<string | null> {
+  if (signal?.aborted) return null;
   const deadline = Date.now() + RDAP_TOTAL_MS;
   for (const base of RDAP_BASES) {
     const remaining = deadline - Date.now();
@@ -88,7 +89,7 @@ async function fetchRdapDate(domain: string): Promise<string | null> {
       const timer = setTimeout(() => controller.abort(), remaining);
       try {
         const resp = await fetch(base + encodeURIComponent(domain), {
-          signal: controller.signal,
+          signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
           redirect: "follow",
           headers: { accept: "application/rdap+json" },
         });
@@ -112,7 +113,8 @@ async function fetchRdapDate(domain: string): Promise<string | null> {
   return null;
 }
 
-async function rdapCreationDate(domain: string): Promise<string | null> {
+async function rdapCreationDate(domain: string, signal?: AbortSignal): Promise<string | null> {
+  if (signal?.aborted) return null;
   const now = Date.now();
   const cached = rdapCache.get(domain);
   if (cached) {
@@ -136,7 +138,7 @@ async function rdapCreationDate(domain: string): Promise<string | null> {
     /* redis unavailable -- fall through to live lookup */
   }
 
-  const date = await fetchRdapDate(domain);
+  const date = await fetchRdapDate(domain, signal);
 
   if (date) {
     try {
@@ -156,7 +158,7 @@ async function rdapCreationDate(domain: string): Promise<string | null> {
 async function whoisCheck(
   regDomain: string,
   hostname: string,
-  opts?: { skipRdap?: boolean },
+  opts?: { skipRdap?: boolean; signal?: AbortSignal },
 ) {
   const reasons: string[] = [];
   const details: Record<string, any> = {};
@@ -212,9 +214,9 @@ async function whoisCheck(
   };
 
   let creationDate: string | null = details.whois.creationDate ?? null;
-  if (!creationDate && !opts?.skipRdap) {
+  if (!creationDate && !opts?.skipRdap && !opts?.signal?.aborted) {
     // whois failed to yield a creation date -- fall back to RDAP (cached)
-    creationDate = await rdapCreationDate(lookupKey);
+    creationDate = await rdapCreationDate(lookupKey, opts?.signal);
     if (creationDate) {
       details.whois.creationDate = creationDate;
       details.whois.source = "rdap";
@@ -240,7 +242,12 @@ async function whoisCheck(
   return { scoreDelta, reasons, details };
 }
 
-export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<CheckResult> {
+export async function heuristicCheck(
+  url: string,
+  parsed?: ParsedUrl,
+  signal?: AbortSignal,
+): Promise<CheckResult> {
+  if (signal?.aborted) return { score: 0 };
   let score = 0;
   const reasons: string[] = [];
 
@@ -336,6 +343,7 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
     await safeResolveHost(hostname);
     dnsResolved = true;
   } catch {
+    if (signal?.aborted) return { score: 0 };
     score += 25;
     reasons.push("DNS failed or private network");
   }
@@ -358,9 +366,12 @@ export async function heuristicCheck(url: string, parsed?: ParsedUrl): Promise<C
     !BRAND_KEYWORDS.some((b) => b !== apex && hasWordBoundary(urlLower, b)) &&
     !SUSPICIOUS_KEYWORDS.some((k) => hasWordBoundary(urlLower, k));
 
+  if (signal?.aborted) return { score: 0 };
+
   // whois lookup
   const whoisResult = await whoisCheck(domain, hostname, {
     skipRdap: !vetoEligible,
+    signal,
   });
   score += whoisResult.scoreDelta;
   reasons.push(...whoisResult.reasons);
@@ -381,4 +392,3 @@ export const HeuristicsChecker: Checker = {
   name: "heuristics",
   check: heuristicCheck,
 };
-

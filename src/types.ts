@@ -21,7 +21,7 @@ export interface ParsedUrl {
 
 export interface Checker {
     name: string;
-    check: (url: string, parsed?: ParsedUrl) => Promise<CheckResult>;
+    check: (url: string, parsed?: ParsedUrl, signal?: AbortSignal) => Promise<CheckResult>;
     /** "ml" checkers only run when the request is authenticated and within its ML quota. */
     minTier?: "free" | "pro" | "ml";
 }

@@ -135,6 +135,7 @@ function localFallbackScore(
 export async function scoreUrlMl(
   url: string,
   meta: any = {},
+  signal?: AbortSignal,
 ): Promise<{ score: number; reasons: string[] }> {
   const mlServiceUrl = process.env.ML_SERVICE_URL;
 
@@ -153,6 +154,7 @@ export async function scoreUrlMl(
         },
         {
           timeout: ML_TIMEOUT_MS,
+          signal,
           headers: { "Content-Type": "application/json" },
         },
       );
@@ -175,6 +177,7 @@ export async function scoreUrlMl(
         reasons,
       };
     } catch (err: any) {
+      if (signal?.aborted) return { score: 0, reasons: [] };
       recordFailure();
       const detail = err.code === "ECONNABORTED" ? "timeout" : err.message;
       console.warn(`ML service call failed (${detail}), using local fallback`);

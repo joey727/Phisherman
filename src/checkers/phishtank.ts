@@ -217,6 +217,7 @@ function normalize(u: string): string {
 export async function checkPhishTank(
   url: string,
   _parsed?: ParsedUrl,
+  signal?: AbortSignal,
 ): Promise<CheckResult> {
   try {
     // First try a compact Bloom filter (fast, in-memory-ish). If it's a false
@@ -263,11 +264,11 @@ export async function checkPhishTank(
 
     // Optionally, use PhishTank's remote API as a last resort. This is slower and less reliable than the local cache, but can catch very recent additions that haven't been ingested yet.
     const apiKey = process.env.PHISHTANK_API_KEY;
-    if (apiKey) {
+    if (apiKey && !signal?.aborted) {
       try {
         const res = await axios.get(
           `https://checkurl.phishtank.com/checkurl/?format=json&app_key=${apiKey}&url=${encodeURIComponent(url)}`,
-          { timeout: 5000 },
+          { timeout: 5000, signal },
         );
         const matched =
           res.data?.results?.valid === "true" || res.data?.valid === true;

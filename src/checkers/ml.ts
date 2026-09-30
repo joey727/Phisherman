@@ -4,6 +4,7 @@ import { scoreUrlMl } from "../utils/ml";
 export async function mlCheck(
   url: string,
   parsed?: ParsedUrl,
+  signal?: AbortSignal,
 ): Promise<CheckResult> {
   try {
     // Pass enrichment context so the ML model can use domain age, prior scores, etc.
@@ -14,7 +15,7 @@ export async function mlCheck(
       meta.protocol = parsed.protocol;
     }
 
-    const { score, reasons } = await scoreUrlMl(url, meta);
+    const { score, reasons } = await scoreUrlMl(url, meta, signal);
     return { score, reasons };
   } catch (err) {
     return { score: 0 };

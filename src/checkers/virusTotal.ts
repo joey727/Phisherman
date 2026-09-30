@@ -55,6 +55,7 @@ function vtUrlId(url: string): string {
 export async function checkVirusTotal(
   url: string,
   _parsed?: ParsedUrl,
+  signal?: AbortSignal,
 ): Promise<CheckResult> {
   const apiKey = process.env.VIRUSTOTAL_API_KEY;
 
@@ -85,6 +86,7 @@ export async function checkVirusTotal(
           Accept: "application/json",
         },
         timeout: 5000,
+        signal,
       },
     );
 
@@ -133,6 +135,7 @@ export async function checkVirusTotal(
     await VT_CACHE.set(url, result, 3600);
     return result;
   } catch (err: any) {
+    if (signal?.aborted) return { score: 0 };
     // 404 = URL not found in VT (not scanned yet) — not an error
     if (err.response?.status === 404) {
       await VT_CACHE.set(url, { score: 0 }, ERROR_CACHE_TTL);

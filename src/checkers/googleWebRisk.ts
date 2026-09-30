@@ -10,7 +10,11 @@ const WEBRISK_ENDPOINT = "https://webrisk.googleapis.com/v1/uris:search";
 const CACHE_TTL = 3600; // 1 hour
 const ERROR_CACHE_TTL = 900; // 15 mins
 
-export async function checkGoogleWebRisk(url: string, _parsed?: ParsedUrl): Promise<CheckResult> {
+export async function checkGoogleWebRisk(
+  url: string,
+  _parsed?: ParsedUrl,
+  signal?: AbortSignal,
+): Promise<CheckResult> {
   try {
     const cached = await gwrCache.get<CheckResult>(url);
     if (cached) return cached;
@@ -34,6 +38,7 @@ export async function checkGoogleWebRisk(url: string, _parsed?: ParsedUrl): Prom
         `uri=${encodeURIComponent(params.uri)}&key=${params.key}` +
         `&threatTypes=MALWARE&threatTypes=SOCIAL_ENGINEERING&threatTypes=UNWANTED_SOFTWARE`,
       timeout: 6000,
+      signal,
     });
 
     let result: CheckResult = { score: 0 };
@@ -47,6 +52,7 @@ export async function checkGoogleWebRisk(url: string, _parsed?: ParsedUrl): Prom
     await gwrCache.set(url, result, CACHE_TTL);
     return result;
   } catch (err: any) {
+    if (signal?.aborted) return { score: 0 };
     console.error("WebRisk error:", err.response?.data || err.message);
     await gwrCache.set(url, { score: 0 }, ERROR_CACHE_TTL);
     return { score: 0 }; // fail open (non-blocking)
