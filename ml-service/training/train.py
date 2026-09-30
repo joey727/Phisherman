@@ -312,14 +312,14 @@ def generate_phishing(n: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def build_classifier() -> XGBClassifier:
-    """Return a new classifier with the project's standard hyperparameters."""
+    """Return a regularized CPU classifier sized for the small URL feature set."""
     return XGBClassifier(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=3,
+        n_estimators=350,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        min_child_weight=5,
         gamma=0.1,
         reg_alpha=0.1,
         reg_lambda=1.0,
@@ -334,7 +334,7 @@ def build_classifier() -> XGBClassifier:
 
 
 def train_on_dataset(
-    X: np.ndarray, y: np.ndarray, test_size: float = 0.15
+    X: np.ndarray, y: np.ndarray, test_size: float = 0.15, groups=None
 ) -> tuple[XGBClassifier, dict]:
     """
     Hold-out trained by default split; returns (model, metrics).
@@ -344,11 +344,21 @@ def train_on_dataset(
     from sklearn.metrics import (
         precision_recall_fscore_support,
         accuracy_score,
+        average_precision_score,
+        brier_score_loss,
+        confusion_matrix,
     )
 
-    X_tr, X_va, y_tr, y_va = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=42
-    )
+    if groups is not None:
+        from sklearn.model_selection import StratifiedGroupKFold
+
+        splitter = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+        tr_idx, va_idx = next(splitter.split(X, y, groups))
+        X_tr, X_va, y_tr, y_va = X[tr_idx], X[va_idx], y[tr_idx], y[va_idx]
+    else:
+        X_tr, X_va, y_tr, y_va = train_test_split(
+            X, y, test_size=test_size, stratify=y, random_state=42
+        )
     clf = build_classifier()
     clf.fit(X_tr, y_tr)
 
@@ -357,11 +367,19 @@ def train_on_dataset(
     prec, rec, f1, _ = precision_recall_fscore_support(
         y_va, pred, average="binary", pos_label=1, zero_division=0
     )
+    tn, fp, fn, tp = confusion_matrix(y_va, pred, labels=[0, 1]).ravel()
     metrics = {
         "precision": float(prec),
         "recall": float(rec),
         "f1": float(f1),
         "accuracy": float(accuracy_score(y_va, pred)),
+        "false_positive_rate": float(fp / (fp + tn)) if fp + tn else 0.0,
+        "pr_auc": float(average_precision_score(y_va, proba)),
+        "brier_score": float(brier_score_loss(y_va, proba)),
+        "evaluation_threshold": 0.5,
+        "split_strategy": "stratified_group_by_registrable_domain" if groups is not None else "stratified_random_rows",
+        "validation_domains": int(len(set(np.asarray(groups)[va_idx]))) if groups is not None else None,
+        "train_domains": int(len(set(np.asarray(groups)[tr_idx]))) if groups is not None else None,
         "training_n": int(len(y)),
         "validation_n": int(len(y_va)),
         "pos_rate_train": float(y.mean()),
